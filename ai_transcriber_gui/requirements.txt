@@ -1,0 +1,14 @@
+# Requirements for ai_transcriber_gui
+# Install with: pip install -r requirements.txt
+# Note: For CPU-only PyTorch on Windows, follow the official PyTorch install guide
+# to select the appropriate wheel (or use the CPU index-url).[https://pytorch.org/get-started/locally/]
+
+soundcard
+soundfile
+pydub
+numpy
+openai-whisper
+faster-whisper
+# torch: install the appropriate build for your platform (CUDA vs CPU)
+torch
+tkinterdnd2  # optional: enables drag-and-drop support in the GUI

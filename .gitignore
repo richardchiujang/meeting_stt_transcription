@@ -1,0 +1,57 @@
+# VS Code
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+.env
+.venv/
+venv/
+*.exe
+*.dll
+gemma
+gemma/*
+
+
+# Runtime output
+ai_transcriber_gui/exports/*
+ai_transcriber_gui/recordings/*
+
+# Keep folder structure but not contents
+!ai_transcriber_gui/exports/.gitkeep
+!ai_transcriber_gui/recordings/.gitkeep
+
+# Bundled FFmpeg binaries
+ai_transcriber_gui/ffmpeg/
+
+# Local model weights (large files)
+ai_transcriber_gui/model/
+!ai_transcriber_gui/model/.gitkeep
+
+# Downloaded archives
+*.7z
+*.zip
+*.tar.gz
+
+# Logs (runtime generated, cleared each run)
+ai_transcriber_gui/exports/transcriber.log
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Python/tooling caches and IDE dirs
+.pytest_cache/
+.mypy_cache/
+pip-wheel-metadata/
+.ropeproject/
+.idea/
+.vscode/settings.json
+.env.local
+.env.*
