@@ -9,7 +9,17 @@
 最後更新：2026-04-09 — 同步更新 `requirements.txt` 與 `.gitignore`。
 本工具提供圖形介面，支援錄製本機音訊（麥克風）或選取現有影音檔，並利用地端 Whisper / faster-whisper 模型進行中英夾雜優化轉錄。
 
-使用 conda python path :   D:\conda_envs\lang_learn
+✅ 更準確的改寫方式
+如果你原意是「效果與速度的整體感覺排序」，可以改寫成：
+
+在相同硬體下，模型越大速度越慢、辨識效果越好；fast-whisper 在相同模型尺寸下會更快
+
+或用技術版一句話：
+
+Accuracy： base < small < medium < large
+Speed（同模型）： fast-whisper ≫ openai-whisper
+
+python 使用 conda python path :   D:\conda_envs\lang_learn
 
 ## 0. 新增變更
 

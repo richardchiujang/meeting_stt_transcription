@@ -95,7 +95,7 @@ class TranscriberApp:
         self.setup_ui()
 
     def setup_ui(self):
-        tk.Label(self.root, text="Whisper 地端轉錄工具", font=("Arial", 14, "bold")).pack(pady=8)
+        tk.Label(self.root, text="fast-Whisper 地端轉錄工具", font=("Arial", 14, "bold")).pack(pady=8)
         self.status_label = tk.Label(self.root, text=f"硬體加速: {self.device.upper()}", fg="blue")
         self.status_label.pack()
 
