@@ -159,7 +159,8 @@ class TranscriberApp:
 
         # show startup instructions in result area (file + short technical note)
         try:
-            self._show_startup_instructions()
+            # self._show_startup_instructions()
+            pass
         except Exception:
             logger.exception('Failed to show startup instructions')
 
