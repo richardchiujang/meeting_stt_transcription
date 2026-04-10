@@ -48,6 +48,9 @@ if os.path.isdir(FFMPEG_BIN):
 if AudioSegment is not None and os.path.isfile(FFMPEG_EXE):
     AudioSegment.converter = FFMPEG_EXE
 
+# Force HuggingFace hub offline mode by default to avoid unexpected network downloads
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 # Default local model directories (no network download needed)
 DEFAULT_FW_MODEL = os.path.join(BASE_DIR, "model", "faster-whisper")
 DEFAULT_W_MODEL_DIR = os.path.join(BASE_DIR, "model", "whisper")
@@ -116,12 +119,16 @@ class TranscriberApp:
         self.btn_stop_trans = tk.Button(btn_frame, text="停止轉錄", command=self.stop_transcription_now, bg="#ff6f61")
         self.btn_stop_trans.grid(row=0, column=4, padx=6)
 
-        # Model selection dropdown
+        # Model selection dropdown (use base/small/medium - executed with faster-whisper)
         model_frame = tk.Frame(self.root)
         model_frame.pack(pady=(6, 0), padx=8, fill=tk.X)
         tk.Label(model_frame, text="模型:").pack(side=tk.LEFT)
-        available_models = self._scan_models()
-        default_model = "base" if "base" in available_models else available_models[0]
+        # Present a concise list of six models (faster-whisper and whisper variants)
+        available_models = [
+            "faster-whisper-base", "faster-whisper-small", "faster-whisper-medium",
+            "whisper-base", "whisper-small", "whisper-medium",
+        ]
+        default_model = "faster-whisper-base"
         self.model_var = tk.StringVar(value=default_model)
         self.model_combo = ttk.Combobox(
             model_frame, textvariable=self.model_var,
@@ -149,6 +156,12 @@ class TranscriberApp:
         self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
         self.progress_label = tk.Label(progress_frame, text="0%")
         self.progress_label.pack(side=tk.LEFT, padx=(6,0))
+
+        # show startup instructions in result area (file + short technical note)
+        try:
+            self._show_startup_instructions()
+        except Exception:
+            logger.exception('Failed to show startup instructions')
 
     def log(self, text):
         ts = datetime.now().strftime('%H:%M:%S')
@@ -266,6 +279,30 @@ class TranscriberApp:
             pct = 0
         self.progress_label.config(text=f"{pct}%")
 
+    def _show_startup_instructions(self):
+        """Load and display STT instruction file and a short accuracy/speed note on startup."""
+        try:
+            # file is one level above ai_transcriber_gui
+            fname = os.path.abspath(os.path.join(BASE_DIR, '.', 'STT(語音轉文字)程式使用說明.txt'))
+            header = "--- STT(語音轉文字) 程式使用說明 ---\n\n"
+            note = (
+                "在相同硬體下，模型越大速度越慢、辨識效果越好；fast-whisper 在相同模型尺寸下會更快\n\n"
+                "Accuracy： base < small < medium < large\n"
+                "Speed（同模型）： fast-whisper ≫ openai-whisper\n\n"
+            )
+            if os.path.isfile(fname):
+                try:
+                    with open(fname, 'r', encoding='utf-8') as fh:
+                        content = fh.read()
+                except Exception:
+                    content = f"無法讀取說明檔: {fname}\n"
+                self.result_area.insert(tk.END, header + content + "\n" + note + "---\n\n")
+            else:
+                self.result_area.insert(tk.END, header + f"說明檔不存在: {fname}\n\n" + note + "---\n\n")
+            self.result_area.see(tk.END)
+        except Exception:
+            logger.exception('Error showing startup instructions')
+
     def stop_transcription_now(self):
         self.stop_transcription = True
         # clear queue
@@ -369,14 +406,9 @@ class TranscriberApp:
 
     def _scan_models(self):
         """Return list of available model names from model/ directory."""
-        models = []
-        if os.path.isdir(DEFAULT_W_MODEL_DIR):
-            for f in sorted(os.listdir(DEFAULT_W_MODEL_DIR)):
-                if f.endswith(".pt"):
-                    models.append(os.path.splitext(f)[0])
-        if os.path.isfile(os.path.join(DEFAULT_FW_MODEL, "model.bin")):
-            models.append("faster-whisper")
-        return models if models else ["base"]
+        # Present a fixed, recommended set of model options.
+        # These model names will be run using the faster-whisper runtime.
+        return ["base", "small", "medium"]
 
     def _on_model_change(self, *_args):
         """Reset cached model when selection changes."""
@@ -443,15 +475,21 @@ class TranscriberApp:
 
         selected = self.model_var.get()
 
-        if selected == "faster-whisper":
+        if selected.startswith("faster-whisper"):
             if FWWhisperModel is None:
                 self.log("faster-whisper 未安裝，無法即時轉錄。")
                 return
-            if self.fw_model is None:
+            if self.fw_model is None or self.loaded_model_name != selected:
                 try:
-                    self.fw_model = FWWhisperModel(DEFAULT_FW_MODEL, device=self.device, compute_type="float16" if self.device=="cuda" else "int8")
-                    self.log("已載入模型（即時模式）: faster-whisper")
-                    logger.info("faster-whisper model loaded for realtime")
+                    # prefer a local model folder named like 'faster-whisper-base' under model/faster-whisper/
+                    model_dir = os.path.join(BASE_DIR, "model", "faster-whisper", selected)
+                    if not os.path.isdir(model_dir):
+                        # fallback to DEFAULT_FW_MODEL (e.g. model/faster-whisper) if custom folder not present
+                        model_dir = DEFAULT_FW_MODEL
+                    self.fw_model = FWWhisperModel(model_dir, device=self.device, compute_type="float16" if self.device=="cuda" else "int8")
+                    self.loaded_model_name = selected
+                    self.log(f"已載入模型（即時模式）: {selected} (faster-whisper)")
+                    logger.info("faster-whisper model loaded for realtime: %s", selected)
                 except Exception as e:
                     self.fw_model = None
                     self.log(f"載入 faster-whisper 失敗: {e}")
@@ -463,8 +501,9 @@ class TranscriberApp:
                 return
             if self.model is None or self.loaded_model_name != selected:
                 try:
-                    self.log(f"已載入模型（即時模式）: {selected}")
-                    self.model = whisper.load_model(selected, device=self.device, download_root=DEFAULT_W_MODEL_DIR)
+                    size = selected.split("-")[-1]
+                    self.log(f"已載入模型（即時模式）: {selected} (openai-whisper)")
+                    self.model = whisper.load_model(size, device=self.device, download_root=DEFAULT_W_MODEL_DIR)
                     self.loaded_model_name = selected
                 except Exception as e:
                     self.log(f"載入 {selected} 失敗: {e}")
@@ -488,7 +527,7 @@ class TranscriberApp:
 
             # Transcribe chunk
             try:
-                if selected == "faster-whisper" and self.fw_model is not None:
+                if selected.startswith("faster-whisper") and self.fw_model is not None:
                     length = getattr(item, 'size', len(item) if item is not None else 0)
                     if length == 0:
                         continue
@@ -555,17 +594,21 @@ class TranscriberApp:
             except Exception:
                 tmp_src = None
 
-            if selected == "faster-whisper":
+            if selected.startswith("faster-whisper"):
                 if FWWhisperModel is None:
                     self.log("faster-whisper 未安裝，無法轉錄。")
                     return
-                if self.fw_model is None:
-                    self.log("載入模型: faster-whisper")
+                if self.fw_model is None or self.loaded_model_name != selected:
+                    self.log(f"載入模型: {selected} (faster-whisper)")
+                    # prefer nested folder: model/faster-whisper/<selected>
+                    model_dir = os.path.join(BASE_DIR, "model", "faster-whisper", selected)
+                    if not os.path.isdir(model_dir):
+                        model_dir = DEFAULT_FW_MODEL
                     self.fw_model = FWWhisperModel(
-                        DEFAULT_FW_MODEL, device=self.device,
+                        model_dir, device=self.device,
                         compute_type="float16" if self.device == "cuda" else "int8"
                     )
-                    self.loaded_model_name = "faster-whisper"
+                    self.loaded_model_name = selected
                 self.log("開始轉錄，請稍候...")
                 ip = self.get_initial_prompt()
                 # use converted source if available
@@ -578,10 +621,12 @@ class TranscriberApp:
                 if whisper is None:
                     self.log("openai-whisper 未安裝，無法轉錄。")
                     return
+                # selected like 'whisper-base' -> load 'base' from DEFAULT_W_MODEL_DIR
+                size = selected.split("-")[-1]
                 if self.model is None or self.loaded_model_name != selected:
-                    self.log(f"載入模型: {selected}")
+                    self.log(f"載入模型: {selected} (openai-whisper)")
                     self.model = whisper.load_model(
-                        selected, device=self.device, download_root=DEFAULT_W_MODEL_DIR
+                        size, device=self.device, download_root=DEFAULT_W_MODEL_DIR
                     )
                     self.loaded_model_name = selected
                 self.log("開始轉錄，請稍候...")
@@ -662,19 +707,27 @@ class TranscriberApp:
 
                 # ensure model loaded based on dropdown selection
                 selected = self.model_var.get()
-                if selected == "faster-whisper":
+                if selected.startswith("faster-whisper"):
                     if FWWhisperModel is None:
                         raise RuntimeError("faster-whisper 未安裝")
-                    if self.fw_model is None:
-                        self.fw_model = FWWhisperModel(DEFAULT_FW_MODEL, device=self.device, compute_type="float16" if self.device=="cuda" else "int8")
-                        logger.info("faster-whisper model loaded for file stream")
-                else:
+                    if self.fw_model is None or self.loaded_model_name != selected:
+                        # prefer nested folder: model/faster-whisper/<selected>
+                        model_dir = os.path.join(BASE_DIR, "model", "faster-whisper", selected)
+                        if not os.path.isdir(model_dir):
+                            model_dir = DEFAULT_FW_MODEL
+                        self.fw_model = FWWhisperModel(model_dir, device=self.device, compute_type="float16" if self.device=="cuda" else "int8")
+                        self.loaded_model_name = selected
+                        logger.info("faster-whisper model loaded for file stream: %s", selected)
+                elif selected.startswith("whisper"):
                     if whisper is None:
                         raise RuntimeError("openai-whisper 未安裝")
+                    size = selected.split("-")[-1]
                     if self.model is None or self.loaded_model_name != selected:
-                        self.model = whisper.load_model(selected, device=self.device, download_root=DEFAULT_W_MODEL_DIR)
+                        self.model = whisper.load_model(size, device=self.device, download_root=DEFAULT_W_MODEL_DIR)
                         self.loaded_model_name = selected
                         logger.info("whisper model loaded for file stream: %s", selected)
+                else:
+                    raise RuntimeError(f"Unrecognized model selection: {selected}")
 
                 self.progress.config(mode='determinate', maximum=100)
                 self.progress['value'] = 0
@@ -707,7 +760,7 @@ class TranscriberApp:
                     # transcribe this chunk
                     try:
                         ip = self.get_initial_prompt()
-                        if selected == "faster-whisper":
+                        if selected.startswith("faster-whisper"):
                             segments, _ = self.fw_model.transcribe(chunk, initial_prompt=ip)
                             for seg in segments:
                                 txt = seg.text.strip()

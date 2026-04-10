@@ -35,7 +35,8 @@ ai_transcriber_gui/
 ├── requirements.txt      # 依賴套件
 ├── ffmpeg/               # FFmpeg 執行檔 (bin/ 底下需有 ffmpeg.exe)
 ├── recordings/           # 存放錄製的 mp3
-└── exports/              # 存放轉錄的 txt
+├── exports/              # 存放轉錄的 txt
+└── model/                # whisper model
 ```
 
 ## 2. 安裝依賴套件
@@ -361,5 +362,10 @@ if __name__ == "__main__":
 只包 ai_transcriber_gui\main.py、ai_transcriber_gui\ffmpeg、其他必要的套件
 ai_transcriber_gui\model、ai_transcriber_gui\exports、ai_transcriber_gui\recordings 不打包
 只要存在同一層資料夾內即可
-模型共有 whisper base、 small、 medium 、fast-whisper 
+模型共有 6 個：`whisper-base`、`whisper-small`、`whisper-medium`、
+`faster-whisper-base`、`faster-whisper-small`、`faster-whisper-medium`。
+
+預設 UI 選單顯示 `base / small / medium`，程式會對應使用 `faster-whisper-<size>` 以獲得更快的推論速度；若需要使用原生 OpenAI `whisper` 實作，請指定對應的 `whisper-<size>` 模型目錄。
+
+建議將模型放在 `ai_transcriber_gui/model/` 下的子資料夾（例如 `ai_transcriber_gui/model/faster-whisper-base/`），以便在無網路環境下離線載入。若使用自動下載，請確保系統有有效的 SSL 憑證並允許下載大檔（數百 MB 至數 GB）。
 

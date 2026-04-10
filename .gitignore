@@ -38,6 +38,7 @@ ai_transcriber_gui/model/
 *.7z
 *.zip
 *.tar.gz
+*.bin
 
 # Logs (runtime generated, cleared each run)
 ai_transcriber_gui/exports/transcriber.log
@@ -55,3 +56,7 @@ pip-wheel-metadata/
 .vscode/settings.json
 .env.local
 .env.*
+
+# .github
+.github/workflows/
+
