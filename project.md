@@ -369,3 +369,6 @@ ai_transcriber_gui\model、ai_transcriber_gui\exports、ai_transcriber_gui\recor
 
 建議將模型放在 `ai_transcriber_gui/model/` 下的子資料夾（例如 `ai_transcriber_gui/model/faster-whisper-base/`），以便在無網路環境下離線載入。若使用自動下載，請確保系統有有效的 SSL 憑證並允許下載大檔（數百 MB 至數 GB）。
 
+cd D:\Python\meeting_stt_transcription
+D:\conda_envs\lang_learn\python.exe build_exe.py 2>&1 | Tee-Object -FilePath build.log
+

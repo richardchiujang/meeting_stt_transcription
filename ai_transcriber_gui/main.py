@@ -482,10 +482,11 @@ class TranscriberApp:
             if self.fw_model is None or self.loaded_model_name != selected:
                 try:
                     # prefer a local model folder named like 'faster-whisper-base' under model/faster-whisper/
-                    model_dir = os.path.join(BASE_DIR, "model", "faster-whisper", selected)
+                    model_dir = os.path.join(DEFAULT_FW_MODEL, selected)
                     if not os.path.isdir(model_dir):
-                        # fallback to DEFAULT_FW_MODEL (e.g. model/faster-whisper) if custom folder not present
-                        model_dir = DEFAULT_FW_MODEL
+                        self.log(f"找不到模型目錄: {model_dir}")
+                        logger.error("Model directory not found: %s", model_dir)
+                        return
                     self.fw_model = FWWhisperModel(model_dir, device=self.device, compute_type="float16" if self.device=="cuda" else "int8")
                     self.loaded_model_name = selected
                     self.log(f"已載入模型（即時模式）: {selected} (faster-whisper)")
@@ -601,9 +602,11 @@ class TranscriberApp:
                 if self.fw_model is None or self.loaded_model_name != selected:
                     self.log(f"載入模型: {selected} (faster-whisper)")
                     # prefer nested folder: model/faster-whisper/<selected>
-                    model_dir = os.path.join(BASE_DIR, "model", "faster-whisper", selected)
+                    model_dir = os.path.join(DEFAULT_FW_MODEL, selected)
                     if not os.path.isdir(model_dir):
-                        model_dir = DEFAULT_FW_MODEL
+                        self.log(f"找不到模型目錄: {model_dir}")
+                        logger.error("Model directory not found: %s", model_dir)
+                        return
                     self.fw_model = FWWhisperModel(
                         model_dir, device=self.device,
                         compute_type="float16" if self.device == "cuda" else "int8"
@@ -712,9 +715,9 @@ class TranscriberApp:
                         raise RuntimeError("faster-whisper 未安裝")
                     if self.fw_model is None or self.loaded_model_name != selected:
                         # prefer nested folder: model/faster-whisper/<selected>
-                        model_dir = os.path.join(BASE_DIR, "model", "faster-whisper", selected)
+                        model_dir = os.path.join(DEFAULT_FW_MODEL, selected)
                         if not os.path.isdir(model_dir):
-                            model_dir = DEFAULT_FW_MODEL
+                            raise RuntimeError(f"找不到模型目錄: {model_dir}")
                         self.fw_model = FWWhisperModel(model_dir, device=self.device, compute_type="float16" if self.device=="cuda" else "int8")
                         self.loaded_model_name = selected
                         logger.info("faster-whisper model loaded for file stream: %s", selected)

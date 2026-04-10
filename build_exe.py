@@ -41,6 +41,20 @@ ADD_DATA = [
     # so they are reachable from sys._MEIPASS at runtime.
 ]
 
+# Additional static data to include alongside the exe
+ADD_DATA += [
+    (SRC_APP / 'STT(語音轉文字)程式使用說明.txt', '.'),
+    (SRC_APP / 'exports', 'exports'),
+    (SRC_APP / 'recordings', 'recordings'),
+]
+
+# Modules to exclude from the bundled exe (avoid pulling large/unneeded model packages)
+EXCLUDE_MODULES = [
+    'transformers.models.gemma',
+    'transformers.models.gemma2',
+    'transformers.models.gemma3',
+]
+
 
 def _whisper_assets_path() -> Path | None:
     """Return the whisper/assets directory from the conda env, or None."""
@@ -159,6 +173,10 @@ def build_with_pyinstaller():
             continue
         spec_args += ['--add-data', f"{str(src)}{sep}{dest}"]
 
+    # Add exclude-module flags to avoid bundling large transformer model implementations like Gemma
+    for m in EXCLUDE_MODULES:
+        spec_args += ['--exclude-module', m]
+
     entry = BUILD_DIR / ENTRY_SCRIPT
     spec_args.append(str(entry))
 
@@ -181,6 +199,19 @@ def build_with_pyinstaller():
         raise RuntimeError('PyInstaller failed')
 
 
+def copy_models_to_dist():
+    """Copy model/ directory next to the built exe (not inside it)."""
+    src_model = SRC_APP / 'model'
+    dst_model = DIST_DIR / 'model'
+    if not src_model.is_dir():
+        print(f'Warning: model source not found at {src_model}, skipping model copy.')
+        return
+    if dst_model.exists():
+        shutil.rmtree(dst_model)
+    shutil.copytree(src_model, dst_model)
+    print(f'Copied model/ to {dst_model}')
+
+
 def main():
     print('Preparing build copy...')
     prepare_build_copy()
@@ -189,6 +220,8 @@ def main():
     print('Running PyInstaller... (this may take minutes)')
     build_with_pyinstaller()
     print('Build complete. Output in dist')
+    print('Copying model files to dist/ (next to exe)...')
+    copy_models_to_dist()
     print('Cleaning up temporary build copy...')
     try:
         shutil.rmtree(BUILD_DIR)
