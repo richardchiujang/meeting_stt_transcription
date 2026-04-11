@@ -18,7 +18,7 @@ venv/
 *.dll
 gemma
 gemma/*
-build.log
+*.log
 
 
 # Runtime output
