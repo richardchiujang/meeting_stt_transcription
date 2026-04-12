@@ -17,3 +17,27 @@
 8.產生的錄音檔位置 : recordings。產生的輸出文字檔位置 : exports
 
 9.完成後直接上傳文字檔到 copilot 即可產生會議摘要 ( 文字檔內含產生會議摘要的 prompt )
+
+附加：WASAPI loopback（系統音）與雙軌錄音說明
+-------------------------------------------------
+
+1. 若要同時錄製麥克風與系統音（雙軌），請在主介面選擇「雙軌 (Mic + Loopback)」。
+2. Windows 平台上系統音的擷取：
+	- 建議安裝 `PyAudioWPatch`（或其他支援 WASAPI loopback 的 PyAudio 派生版），以提高穩定性。
+	- 若未安裝 PyAudio，也會嘗試使用 `soundcard` 列舉出的 loopback 類型麥克風作為替代，但不同驅動/硬體可能差異很大。
+3. 測試步驟：
+	- 使用你安裝 PyAudioWPatch 的 Python 啟動應用程式，例如：
+
+	  D:\conda_envs\lang_learn\python main.py
+
+	- 在錄製時播放系統音，錄 8–10 秒，停止後檢查 `recordings/` 目錄應會有 `loop_*.mp3`（或 wav）。
+	- GUI 左下角的 VU 表：`m` 表示麥克風音量，`s` 表示系統/loopback 音量，二者應該可以分辨出來源波動。
+4. 若沒有捕到系統音：
+	- 確認啟動時的 Python 與安裝 PyAudioWPatch 的環境相同。
+	- 執行 `ai_transcriber_gui/list_devices.py`，檢查是否列出任何帶有 `Loopback` 的裝置（或 `立體聲混音`、`Stereo Mix` 等）。
+	- 若仍無法擷取，請將 `ai_transcriber_gui/exports/transcriber.log` 與 `ai_transcriber_gui/exports/devices.txt`（若已產生）貼上以便檢查。
+
+5. 其他注意事項：
+	- 若遇到 MediaFoundation 或資料中斷（data discontinuity）警告，程式已嘗試採用裝置原生取樣率與較大 chunk（約 200ms）來緩解；如仍頻繁發生，建議改用 PyAudioWPatch 或更新音效驅動程式。
+
+感謝回饋：若你完成上述測試並仍無系統音，請回傳錄製時的 `transcriber.log` 與 `list_devices.py` 的輸出，我會協助比對 pyaudio 與 soundcard 的裝置清單並調整對應邏輯。

@@ -60,3 +60,45 @@ pip install --index-url https://download.pytorch.org/whl/cpu torch
 
 ---
 最後更新：2026-04-09
+
+WASAPI Loopback (系統音) 支援與測試
+----------------------------------
+
+本程式已新增對 Windows WASAPI loopback（系統播放音訊）錄製的支援，會嘗試以下列順序擷取系統音：
+
+- 優先使用 PyAudio（建議使用已打補丁支援 WASAPI loopback 的 PortAudio wheel，例如 `PyAudioWPatch`）。
+- 若 PyAudio 不可用，會嘗試透過 `soundcard` 列舉的 loopback 類型麥克風（若有）作為替代。
+
+安裝建議（conda env 範例）：
+
+```powershell
+conda activate lang_learn
+pip install -r ai_transcriber_gui/requirements.txt
+# 若需要可靠的 WASAPI loopback，安裝 PyAudioWPatch（示例版號，請以最新為準）
+pip install PyAudioWPatch==0.2.12.8
+```
+
+啟動與測試
+
+1. 用你安裝了 PyAudioWPatch 的 Python 啟動應用程式：
+
+```powershell
+D:\conda_envs\lang_learn\python ai_transcriber_gui\main.py
+```
+
+2. 在 GUI 中選擇錄音來源為「雙軌 (Mic + Loopback)」，按下錄製並在電腦播放一段系統聲音（或會議音），錄製 8–10 秒後停止。
+3. 觀察左下角兩個 VU 表：`m` 為麥克風，`s` 為系統/loopback。若 `s` 有波動代表已捕捉到系統音。
+4. 完成後檢查 `ai_transcriber_gui/recordings/` 是否產生 `loop_*.mp3`（或 wav），以及 `ai_transcriber_gui/exports/transcriber.log` 以取得診斷資訊。
+
+疑難排解
+
+- 若 GUI 只錄到麥克風但沒有系統音：
+	- 確認 GUI 是使用你已安裝 PyAudioWPatch 的 Python（`sys.executable` 與你執行安裝時一致）。
+	- 若沒有 PyAudioWPatch，可執行專用裝置列舉腳本 `ai_transcriber_gui/list_devices.py`，檢查是否有 Loopback 類型的麥克風（例如 `Loopback 喇叭 (Realtek...)`）。
+	- 若 `list_devices.py` 顯示有 loopback，但程式仍未捕捉，請將 `ai_transcriber_gui/exports/transcriber.log` 與裝置列舉輸出貼上以便分析。
+
+- 若出現大量 "data discontinuity" 或 MediaFoundation 相關警告：
+	- 程式已嘗試調高 chunk 大小並使用裝置原生取樣率以減少此問題；若問題仍存在，建議改用 PyAudioWPatch 路徑或更新音效驅動程式。
+
+文件更新紀錄
+- 2026-04-12: 新增 WASAPI loopback 測試說明與 PyAudioWPatch 建議安裝步驟。

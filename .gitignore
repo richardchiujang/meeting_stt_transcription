@@ -62,5 +62,8 @@ pip-wheel-metadata/
 # .github
 .github/workflows/
 
+exports
+recordings
+
 
 

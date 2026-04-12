@@ -12,3 +12,4 @@ faster-whisper
 # torch: install the appropriate build for your platform (CUDA vs CPU)
 torch
 tkinterdnd2  # optional: enables drag-and-drop support in the GUI
+PyAudioWPatch

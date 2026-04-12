@@ -7,39 +7,40 @@ applyTo:
 
 # Workspace instructions — AI 會話助手使用指南
 
-目的：提供簡潔、可被 agent 自動載入的專案啟動、執行與打包指令，並指向更豐富的文件（README.md、project.md）。
+- **執行**（從專案根目錄）：
+  ```powershell
+  cd D:\Python\meeting_stt_transcription
+  D:\conda_envs\lang_learn\python.exe -m ai_transcriber_gui.main
+  ```
+  - Python：`D:\conda_envs\lang_learn\python.exe`（Conda env `lang_learn`）
+  - `recordings/` 與 `exports/` 位於**專案根目錄**，不在 `ai_transcriber_gui/`
 
-主要內容（簡短清單）：
+- **FFmpeg**：`ai_transcriber_gui/ffmpeg/bin/ffmpeg.exe`
+- **模型**：`ai_transcriber_gui/model/`（不納入版本控制）
+- **打包**：`D:\conda_envs\lang_learn\python.exe build_exe.py`（見 [project.md](project.md)）
 
-- **執行應用程式**
-  - 安裝依賴： `pip install -r ai_transcriber_gui/requirements.txt`
-  - 路徑 : `cd ai_transcriber_gui`  
-  - 執行： `D:\conda_envs\lang_learn\python main.py`
-  - python 使用 conda 環境： `D:\conda_envs\lang_learn\python`（請根據實際環境調整）
+- **測試**：
+  ```powershell
+  D:\conda_envs\lang_learn\python.exe -m ai_transcriber_gui.tests.smoke_test
+  D:\conda_envs\lang_learn\python.exe -m ai_transcriber_gui.tests.test_mp3
+  ```
+  快速音檔：`recordings/bq96s64K2YM_30s.mp3`（30 秒）；完整：`recordings/bq96s64K2YM.mp3`（20 分鐘，216 segments）
 
-- **FFmpeg**
-  - 請將 `ffmpeg/bin/ffmpeg.exe` 放置於 `ai_transcriber_gui/ffmpeg/bin`，或將系統 PATH 指向已安裝的 ffmpeg
+- **參考文件**：[project.md](project.md)、[README.md](README.md)、[main.py](ai_transcriber_gui/main.py)
 
-- **模型檔案**
-  - 模型重量檔（whisper / faster-whisper）請放在 `ai_transcriber_gui/model/`。這些大檔通常不會被版本控制。
+> 規則：勿自動下載或修改模型；說明請用中文。
 
-- **打包為 .exe（簡要）**
-  - 使用專案根目錄的 `build_exe.py`（本機需有 PyInstaller 與相容的 Python 環境）
-  - 建議在專用的 Conda 環境中執行，或依 `project.md` 的說明操作
+## src/ 模組重構狀態
 
-- **常用檔案（參考）**
-  - 詳細說明： [project.md](project.md)
-  - 專案總覽： [README.md](README.md)
-  - 主程式： [ai_transcriber_gui/main.py](ai_transcriber_gui/main.py)
-  - 依賴檔： [ai_transcriber_gui/requirements.txt](ai_transcriber_gui/requirements.txt)
+| 模組 | 路徑 | 狀態 |
+|------|------|------|
+| STT / Transcriber | `src/stt.py` | ✅ 完成 |
+| Audio helpers | `src/utils.py` | ✅ 完成 |
+| 錄音 / loopback | `src/recorder.py` | ⬜ 待完成 |
+| 裝置列舉 | `src/devices.py` | ⬜ 待完成 |
+| GUI / TranscriberApp | `src/ui.py` | ⬜ 待完成 |
 
-Guidelines for agents and contributors:
+**路徑重要異動**：`recordings/` 與 `exports/` 已移至專案根目錄；`main.py` 的 `PROJECT_ROOT`、`RECORDINGS_DIR`、`EXPORTS_DIR` 常數已更新。
 
-- Prefer linking to the long-form docs (`project.md`, `README.md`) instead of duplicating them.
-- Do not attempt to download or modify model weights automatically. If a task requires models, ask the user for approval.
-- Use the `applyTo` glob to restrict instructions to files under `ai_transcriber_gui/` so agents only load this guidance for relevant requests.
-- 用中文說明，因為專案主要是中文使用者和開發者。
-
-If you want, I can also add example prompts (developer and user-facing) and a small troubleshooting checklist for common packaging errors.
-
+**已驗證**：`faster-whisper-base` 在 20 分鐘英文音檔上產生 216 segments，language=English, prob=1.0 ✅
 
