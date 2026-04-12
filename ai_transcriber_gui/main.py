@@ -152,6 +152,9 @@ class TranscriberApp:
         progress_frame = tk.Frame(self.root)
         progress_frame.pack(fill=tk.X, padx=12, pady=(0,12))
         tk.Label(progress_frame, text="狀態:").pack(side=tk.LEFT)
+        # volume meter (VU) canvas
+        self.vol_canvas = tk.Canvas(progress_frame, width=120, height=16, bg="black", highlightthickness=1, highlightbackground="#444")
+        self.vol_canvas.pack(side=tk.LEFT, padx=6)
         self.progress = ttk.Progressbar(progress_frame, mode='indeterminate')
         self.progress.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
         self.progress_label = tk.Label(progress_frame, text="0%")
@@ -205,6 +208,17 @@ class TranscriberApp:
                     m_data = mic_rec.record(numframes=frames)
 
                     chunk = np.mean(m_data, axis=1).astype(np.float32)
+                    # compute a simple RMS level and update VU meter
+                    try:
+                        rms = np.sqrt(np.mean(chunk.astype(np.float64) ** 2))
+                        # map RMS to 0-100%; reference value 0.1 (tweakable)
+                        pct = int(min(100, (rms / 0.1) * 100))
+                        try:
+                            self.root.after(0, self.update_volume, pct)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
                     # append to shared buffer for possible early save
                     try:
                         self.full_audio.append(chunk)
@@ -248,6 +262,10 @@ class TranscriberApp:
             return
         self.is_recording = False
         self.log("停止錄音，處理中...")
+        try:
+            self.root.after(0, self.update_volume, 0)
+        except Exception:
+            pass
 
     def select_file(self):
         file_path = filedialog.askopenfilename(filetypes=[("Media Files", "*.mp3 *.wav *.mp4 *.mkv *.m4a *.mov *.wmv")])
@@ -279,6 +297,35 @@ class TranscriberApp:
         except Exception:
             pct = 0
         self.progress_label.config(text=f"{pct}%")
+
+    def update_volume(self, percent: int):
+        """Update the VU meter canvas. `percent` is 0-100."""
+        try:
+            pct = max(0, min(100, int(percent)))
+        except Exception:
+            pct = 0
+        try:
+            w = int(self.vol_canvas.winfo_width() or 120)
+            h = int(self.vol_canvas.winfo_height() or 16)
+        except Exception:
+            w, h = 120, 16
+        fill_w = int((pct / 100.0) * w)
+        # choose color: green -> yellow -> red
+        if pct < 60:
+            color = '#3bd14b'
+        elif pct < 85:
+            color = '#ffd24d'
+        else:
+            color = '#ff4d4f'
+        try:
+            self.vol_canvas.delete('all')
+            # background bar
+            self.vol_canvas.create_rectangle(0, 0, w, h, fill='#222', outline='')
+            # filled level
+            if fill_w > 0:
+                self.vol_canvas.create_rectangle(0, 0, fill_w, h, fill=color, outline='')
+        except Exception:
+            pass
 
     def _show_startup_instructions(self):
         """Load and display STT instruction file and a short accuracy/speed note on startup."""
