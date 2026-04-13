@@ -165,6 +165,43 @@ AI_STT_Transcriber/
 └── README.txt                       # 使用說明
 ```
 
+### 彈性打包策略 (動態模型載入)
+
+**程式會自動掃描 `model/` 資料夾**，根據實際存在的模型建立選單。這使得你可以打包不同版本：
+
+**策略 1：最小包 (base-only)**
+```
+model/
+└── faster-whisper/
+    └── faster-whisper-base/         # 僅包含 base 模型
+```
+→ UI 選單只顯示 `faster-whisper-base`
+
+**策略 2：雙模型包 (base + small)**
+```
+model/
+└── faster-whisper/
+    ├── faster-whisper-base/
+    └── faster-whisper-small/
+```
+→ UI 選單顯示兩個選項
+
+**策略 3：完整包 (所有模型)**
+```
+model/
+└── faster-whisper/
+    ├── faster-whisper-base/
+    ├── faster-whisper-small/
+    └── faster-whisper-medium/
+```
+→ UI 選單顯示所有三個選項
+
+**優點**：
+- 無需修改程式碼即可調整模型組合
+- 簡化打包流程（只需複製/刪除模型資料夾）
+- 測試版可使用最小包快速分發
+- 正式版可提供完整包滿足進階需求
+
 ## 疑難排解
 
 ### 打包失敗

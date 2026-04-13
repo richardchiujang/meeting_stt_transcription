@@ -53,6 +53,45 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 DEFAULT_FW_MODEL = os.path.join(BASE_DIR, "model", "faster-whisper")
 DEFAULT_W_MODEL_DIR = os.path.join(BASE_DIR, "model", "whisper")
 
+
+def scan_available_models():
+    """掃描 model/ 資料夾，動態產生可用模型清單
+    
+    Returns:
+        list: 可用的模型名稱清單
+    """
+    available = []
+    
+    # 掃描 faster-whisper 模型（資料夾必須包含 config.json）
+    fw_dir = DEFAULT_FW_MODEL
+    if os.path.isdir(fw_dir):
+        for model_name in os.listdir(fw_dir):
+            model_path = os.path.join(fw_dir, model_name)
+            config_path = os.path.join(model_path, "config.json")
+            if os.path.isdir(model_path) and os.path.isfile(config_path):
+                available.append(model_name)
+                logger.info(f"找到 Faster-Whisper 模型: {model_name}")
+    
+    # 掃描 openai-whisper 模型（.pt 檔案）
+    w_dir = DEFAULT_W_MODEL_DIR
+    if os.path.isdir(w_dir):
+        for filename in os.listdir(w_dir):
+            if filename.endswith('.pt'):
+                # base.pt -> whisper-base
+                model_name = f"whisper-{filename[:-3]}"
+                available.append(model_name)
+                logger.info(f"找到 OpenAI Whisper 模型: {model_name}")
+    
+    # 如果沒有找到任何模型，返回預設清單（避免程式無法啟動）
+    if not available:
+        logger.warning("未找到任何模型，使用預設清單")
+        available = [
+            "faster-whisper-base", "faster-whisper-small", "faster-whisper-medium",
+            "whisper-base", "whisper-small", "whisper-medium",
+        ]
+    
+    return sorted(available)
+
 # recordings and exports are placed at project root (one level above ai_transcriber_gui/)
 RECORDINGS_DIR = os.path.join(PROJECT_ROOT, "recordings")
 EXPORTS_DIR = os.path.join(PROJECT_ROOT, "exports")
@@ -214,6 +253,10 @@ class TranscriberApp:
                 default_source = available_sources[0]
         self.record_source_var = tk.StringVar(value=default_source)
         self._mic_rec_fs = 16000
+
+        # 掃描可用模型
+        self.available_models = scan_available_models()
+        logger.info(f"可用模型: {', '.join(self.available_models)}")
 
         self.setup_ui()
 

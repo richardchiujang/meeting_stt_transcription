@@ -38,11 +38,13 @@ def build_main_ui(app) -> None:
     model_frame = tk.Frame(app.root)
     model_frame.pack(pady=(6, 0), padx=8, fill=tk.X)
     tk.Label(model_frame, text="模型:").pack(side=tk.LEFT)
-    available_models = [
+    # 使用動態掃描的模型清單
+    available_models = getattr(app, 'available_models', [
         "faster-whisper-base", "faster-whisper-small", "faster-whisper-medium",
         "whisper-base", "whisper-small", "whisper-medium",
-    ]
-    default_model = "faster-whisper-base"
+    ])
+    # 選擇預設模型（優先選第一個可用的）
+    default_model = available_models[0] if available_models else "faster-whisper-base"
     app.model_var = tk.StringVar(value=default_model)
     app.model_combo = ttk.Combobox(model_frame, textvariable=app.model_var, values=available_models, state="readonly", width=20)
     app.model_combo.pack(side=tk.LEFT, padx=6)

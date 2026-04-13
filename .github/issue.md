@@ -111,6 +111,16 @@
 - **效果**：減少 exe 體積，提升打包效率
 - **檔案**：`build_exe.py`, `project.md`
 
+### 15. 動態模型清單
+- **狀態**：✅ 已完成 (2026-04-13)
+- **功能**：程式啟動時自動掃描 model/ 資料夾，根據實際存在的模型動態產生清單
+- **掃描邏輯**：
+  - Faster-Whisper：檢查 `model/faster-whisper/*/config.json`
+  - OpenAI Whisper：檢查 `model/whisper/*.pt`
+  - 未找到模型時使用預設清單（避免程式無法啟動）
+- **效果**：支援彈性打包，不同環境可提供不同模型組合
+- **檔案**：`main.py` (`scan_available_models`), `src/ui.py`
+
 ## 📋 待確認項目
 
 ### 音量顯示器

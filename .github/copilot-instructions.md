@@ -72,6 +72,13 @@ D:\conda_envs\lang_learn\python.exe -m ai_transcriber_gui.tests.test_mp3
 - 非即時模式：「停止錄音並轉錄」按鈕 ENABLED
 - 勾選即時轉錄時自動調整按鈕狀態
 
+### 模型掃描機制
+- **啟動時掃描**：程式啟動時自動掃描 `model/` 資料夾
+- **Faster-Whisper 偵測**：檢查 `model/faster-whisper/*/config.json` 存在性
+- **OpenAI Whisper 偵測**：檢查 `model/whisper/*.pt` 檔案
+- **容錯機制**：未找到任何模型時使用預設清單，避免程式無法啟動
+- **彈性部署**：不同打包可提供不同模型組合（base-only / full）
+
 ## 修改規則
 
 - ⛔ 不自動下載或修改模型檔案

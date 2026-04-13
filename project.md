@@ -204,7 +204,30 @@ pip install -r ai_transcriber_gui/requirements.txt
 - **FFmpeg**：`ai_transcriber_gui/ffmpeg/bin/ffmpeg.exe`
 - **模型**：`ai_transcriber_gui/model/faster-whisper/` (不納入版控)
 
-### 模型選擇
+### 模型選擇與載入
+
+**動態模型掃描**：
+- 程式啟動時自動掃描 `model/` 資料夾，根據實際存在的模型動態建立選單
+- **Faster-Whisper 偵測**：檢查 `model/faster-whisper/*/config.json` 存在性
+- **OpenAI Whisper 偵測**：檢查 `model/whisper/*.pt` 檔案
+- **容錯機制**：未找到任何模型時使用預設清單，避免程式無法啟動
+- **彈性部署**：不同打包可提供不同模型組合（base-only / full / custom）
+
+**掃描邏輯** (在 `main.py::scan_available_models()`):
+```python
+# 掃描 Faster-Whisper 模型
+model_dir / "faster-whisper" / <model_name> / config.json
+→ 加入清單: <model_name>
+
+# 掃描 OpenAI Whisper 模型  
+model_dir / "whisper" / <model_name>.pt
+→ 加入清單: <model_name>
+
+# 排序並去重
+sorted(set(models))
+```
+
+**模型特性比較**：
 
 | UI 選項 | 路徑 | 特性 |
 |---------|------|------|
