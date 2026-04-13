@@ -76,16 +76,21 @@ class Transcriber:
         self.model = whisper.load_model(size, device=self.device, download_root=self.w_model_dir)
         self.loaded_model_name = selected_model
 
-    def transcribe_file_to_text(self, file_path: str, selected_model: str) -> list:
+    def transcribe_file_to_text(self, file_path: str, selected_model: str, language: Optional[str] = None, initial_prompt: Optional[str] = None) -> list:
         try:
             if selected_model.startswith('faster-whisper'):
                 if FWWhisperModel is None:
                     return []
                 if self.fw_model is None or self.loaded_model_name != selected_model:
                     self._load_fw_model(selected_model)
-                ip = ''
+                # Build kwargs
+                kwargs = {}
+                if language is not None:
+                    kwargs['language'] = language
+                if initial_prompt is not None:
+                    kwargs['initial_prompt'] = initial_prompt
                 try:
-                    segments, _ = self.fw_model.transcribe(file_path, initial_prompt=ip)
+                    segments, _ = self.fw_model.transcribe(file_path, **kwargs)
                 except Exception:
                     segments, _ = self.fw_model.transcribe(file_path)
                 out = []
@@ -97,8 +102,13 @@ class Transcriber:
                     return []
                 if self.model is None or self.loaded_model_name != selected_model:
                     self._load_whisper_model(selected_model)
-                ip = ''
-                res = self.model.transcribe(file_path, initial_prompt=ip, fp16=(self.device == 'cuda'))
+                # Build kwargs
+                kwargs = {'fp16': (self.device == 'cuda')}
+                if language is not None:
+                    kwargs['language'] = language
+                if initial_prompt is not None:
+                    kwargs['initial_prompt'] = initial_prompt
+                res = self.model.transcribe(file_path, **kwargs)
                 segs = res.get('segments', [])
                 out = []
                 for s in segs:
@@ -107,27 +117,80 @@ class Transcriber:
         except Exception:
             return []
 
-    def transcribe_chunk(self, chunk, selected_model: str) -> str:
-        """Transcribe a numpy float32 chunk and return concatenated text."""
+    def transcribe_chunk(self, chunk, selected_model: str, language: Optional[str] = None, initial_prompt: Optional[str] = None) -> str:
+        """Transcribe a numpy float32 chunk and return concatenated text.
+        
+        Args:
+            chunk: audio data (numpy array)
+            selected_model: model name
+            language: language code ('zh', 'en', etc.) or None for auto-detect
+            initial_prompt: prompt text to guide the model
+        """
         try:
             if selected_model.startswith('faster-whisper'):
                 if self.fw_model is None or self.loaded_model_name != selected_model:
                     self._load_fw_model(selected_model)
-                segments, _ = self.fw_model.transcribe(chunk)
+                # Build kwargs for faster-whisper
+                kwargs = {}
+                if language is not None:
+                    kwargs['language'] = language
+                if initial_prompt is not None:
+                    kwargs['initial_prompt'] = initial_prompt
+                segments, _ = self.fw_model.transcribe(chunk, **kwargs)
                 texts = [getattr(s, 'text', str(s)).strip() for s in segments]
-                return ' '.join([t for t in texts if t])
+                result = ' '.join([t for t in texts if t])
             else:
                 if self.model is None or self.loaded_model_name != selected_model:
                     self._load_whisper_model(selected_model)
-                res = self.model.transcribe(chunk, fp16=(self.device == 'cuda'))
-                return res.get('text', '').strip()
+                # Build kwargs for openai-whisper
+                kwargs = {'fp16': (self.device == 'cuda')}
+                if language is not None:
+                    kwargs['language'] = language
+                if initial_prompt is not None:
+                    kwargs['initial_prompt'] = initial_prompt
+                res = self.model.transcribe(chunk, **kwargs)
+                result = res.get('text', '').strip()
+            
+            # 過濾 prompt 內容：如果轉錄結果只包含 prompt，則忽略
+            if initial_prompt and result:
+                # 移除標點符號和括號後比對
+                import re
+                clean_result = re.sub(r'[。，、！？\s.,!?()（）]', '', result).lower()
+                clean_prompt = re.sub(r'[。，、！？\s.,!?()（）]', '', initial_prompt).lower()
+                
+                # 1. 檢查是否完全相同
+                if clean_result == clean_prompt:
+                    return ''
+                
+                # 2. 檢查 prompt 是否在結果中佔主要部分（>80%）
+                if clean_prompt and len(clean_prompt) > 5:
+                    if clean_prompt in clean_result:
+                        prompt_ratio = len(clean_prompt) / len(clean_result)
+                        if prompt_ratio > 0.8:
+                            return ''
+                
+                # 3. 反向檢查：結果是否為 prompt 的子字串（處理 prompt 變體）
+                if len(clean_result) > 5 and clean_result in clean_prompt:
+                    # 結果是 prompt 的子集，且長度相近（>70%）
+                    if len(clean_result) / len(clean_prompt) > 0.7:
+                        return ''
+                
+                # 4. 檢查 prompt 特徵詞（避免 prompt 常見詞彙進入轉錄）
+                prompt_markers = ['混合討論', 'mixeddiscussion', 'technicalmeeting', '夾雜英文術語', 'properspelling']
+                for marker in prompt_markers:
+                    if marker in clean_result and len(clean_result) < 30:
+                        # 短結果包含 prompt 特徵詞 → 很可能是 prompt
+                        return ''
+            
+            return result
         except Exception:
             return ''
 
-    def transcribe_file_stream(self, file_path: str, selected_model: str, on_segment=None, progress_callback=None, chunk_seconds: int = 8):
+    def transcribe_file_stream(self, file_path: str, selected_model: str, on_segment=None, progress_callback=None, chunk_seconds: int = 8, stop_callback=None, language: Optional[str] = None, initial_prompt: Optional[str] = None):
         """Stream file in chunks and call `on_segment(text)` for each segment found.
 
         `progress_callback(percent)` is optional and will be called with integer percent.
+        `language` and `initial_prompt` are passed to the transcription model.
         """
         tmp_wav = None
         try:
@@ -165,6 +228,13 @@ class Transcriber:
                         self._load_whisper_model(selected_model)
 
                 while True:
+                    if stop_callback is not None:
+                        try:
+                            if stop_callback():
+                                break
+                        except Exception:
+                            pass
+
                     data = fh.read(frames=block_frames, dtype='float32')
                     if data is None or len(data) == 0:
                         break
@@ -183,11 +253,18 @@ class Transcriber:
 
                     # transcribe this chunk
                     try:
-                        txt = self.transcribe_chunk(chunk, selected_model)
+                        txt = self.transcribe_chunk(chunk, selected_model, language=language, initial_prompt=initial_prompt)
                         if txt and on_segment is not None:
                             on_segment(txt)
                     except Exception:
                         pass
+
+                    if stop_callback is not None:
+                        try:
+                            if stop_callback():
+                                break
+                        except Exception:
+                            pass
 
                     processed += len(data)
                     percent = int(min(100, (processed / total_frames) * 100)) if total_frames > 0 else 0
@@ -225,6 +302,3 @@ class Transcriber:
 
 
 __all__ = ['prepare_for_stt', 'Transcriber']
-
-
-__all__ = ["prepare_for_stt"]

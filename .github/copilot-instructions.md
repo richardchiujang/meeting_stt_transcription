@@ -1,54 +1,83 @@
 ---
 name: workspace-instructions
-description: "Use when: running or packaging the AI STT GUI app; quick run/build commands and where models/ffmpeg live. Applies to ai_transcriber_gui/*."
+description: "AI STT GUI 應用程式開發指引"
 applyTo:
   "ai_transcriber_gui/**"
 ---
 
-# Workspace instructions — AI 會話助手使用指南
+# AI 會話助手 — 開發指引
 
-- **執行**（從專案根目錄）：
-  ```powershell
-  cd D:\Python\meeting_stt_transcription
-  D:\conda_envs\lang_learn\python.exe -m ai_transcriber_gui.main
-  ```
-  - Python：`D:\conda_envs\lang_learn\python.exe`（Conda env `lang_learn`）
-  - `recordings/` 與 `exports/` 位於**專案根目錄**，不在 `ai_transcriber_gui/`
+## 執行環境
 
-- **FFmpeg**：`ai_transcriber_gui/ffmpeg/bin/ffmpeg.exe`
-- **模型**：`ai_transcriber_gui/model/`（不納入版本控制）
-- **打包**：`D:\conda_envs\lang_learn\python.exe build_exe.py`（見 [project.md](project.md)）
+```powershell
+# 執行
+cd D:\Python\meeting_stt_transcription
+D:\conda_envs\lang_learn\python.exe -m ai_transcriber_gui.main
 
-- **測試**：
-  ```powershell
-  D:\conda_envs\lang_learn\python.exe -m ai_transcriber_gui.tests.smoke_test
-  D:\conda_envs\lang_learn\python.exe -m ai_transcriber_gui.tests.test_mp3
-  ```
-  快速音檔：`recordings/bq96s64K2YM_30s.mp3`（30 秒）；完整：`recordings/bq96s64K2YM.mp3`（20 分鐘，216 segments）
+# 測試
+D:\conda_envs\lang_learn\python.exe -m ai_transcriber_gui.tests.test_mp3
+```
 
-- **參考文件**：[project.md](project.md)、[README.md](README.md)、[main.py](ai_transcriber_gui/main.py)
+- Python: `D:\conda_envs\lang_learn\python.exe` (Conda env: lang_learn)
+- FFmpeg: `ai_transcriber_gui/ffmpeg/bin/ffmpeg.exe`
+- 模型: `ai_transcriber_gui/model/` (不納入版控)
+- 錄音/輸出: `recordings/`, `exports/` (專案根目錄)
 
-> 規則：勿自動下載或修改模型；說明請用中文。
+## 核心架構
 
-## src/ 模組重構狀態
+### 模組狀態
 
-| 模組 | 路徑 | 狀態 |
+| 模組 | 功能 | 狀態 |
 |------|------|------|
-| STT / Transcriber | `src/stt.py` | ✅ 完成 |
-| Audio helpers | `src/utils.py` | ✅ 完成 |
-| 錄音 / loopback | `src/recorder.py` | ⬜ 待完成 |
-| 裝置列舉 | `src/devices.py` | ⬜ 待完成 |
-| GUI / TranscriberApp | `src/ui.py` | ⬜ 待完成 |
+| `src/stt.py` | STT 引擎、模型載入 | ✅ |
+| `src/utils.py` | 音檔轉換、重採樣 | ✅ |
+| `src/recorder.py` | 單軌錄音 (麥克風/系統音) | ✅ |
+| `src/devices.py` | 裝置列舉 | ✅ |
+| `src/ui.py` | GUI 元件 | ✅ |
+| `src/transcript.py` | 逐字稿處理 | ✅ |
 
-**路徑重要異動**：`recordings/` 與 `exports/` 已移至專案根目錄；`main.py` 的 `PROJECT_ROOT`、`RECORDINGS_DIR`、`EXPORTS_DIR` 常數已更新。
+### 設計原則
 
-**已驗證**：`faster-whisper-base` 在 20 分鐘英文音檔上產生 216 segments，language=English, prob=1.0 ✅
+- **單一錄音來源**：一次只錄麥克風或系統音，不混音
+- **UI 分區**：轉錄結果 / 系統訊息分開顯示
+- **模組化**：業務邏輯在 `src/`，`main.py` 只做流程編排
+- **語言設定**：所有 STT 方法統一傳遞 `language` + `initial_prompt`
 
-## Loopback 錄音架構（2026-04-12 修正完成）
+## 技術要點
 
-- `scan_audio_devices`：用 `dev.isloopback` 分類 mic vs loopback；PyAudioWPatch 補充列舉
-- `_device_map[name]` 存放 soundcard `Microphone` 物件（loopback）或 `('pyaudio', idx, info)` tuple
-- 雙軌錄音用裝置原生 samplerate（`default_samplerate`，通常 48k）；`_mic_rec_fs` / `_loop_rec_fs` 記錄實際 fs
-- PyAudio+soundcard 混合路徑：soundcard recorder 在 `while` 迴圈**外**以 `__enter__` 開啟，`finally` 中 `__exit__`
-- `_save_recording_file`：即時模式停止時呼叫，讀 `_mic_rec_fs/_loop_rec_fs`，同 fs 時 mic+loopback 混音（×0.6 clip），輸出 mp3
+### 系統音錄音 (Loopback)
+- 使用 `sc.all_microphones(include_loopback=True)` 列舉裝置
+- 以 `dev.isloopback` 屬性篩選 loopback 裝置
+- 採用裝置原生 samplerate (通常 48kHz)
+
+### Whisper 語言設定
+
+**語言映射**：
+- 主要中文 → `language='zh'`, prompt="以繁體中文為主，夾雜英文術語。"
+- 主要英文 → `language='en'`, prompt="This is a technical meeting in English."
+- 系統自動判斷 → `language=None`, prompt="繁體中文與英文混合討論。"
+
+**統一傳遞**：所有轉錄方法 (`transcribe_chunk`, `transcribe_file_stream`, `transcribe_file_to_text`) 都接收 `language` 和 `initial_prompt` 參數。
+
+**Prompt 過濾**：`transcribe_chunk` 會自動過濾與 prompt 相同的結果，使用多重策略：
+1. 完全相同比對
+2. Prompt 佔比檢查（>80%）
+3. 反向子字串檢查（處理 prompt 變體）
+4. 特徵詞過濾（「混合討論」等標誌詞）
+
+避免 Whisper 在無語音/低質量音訊時輸出 prompt 內容。注意「系統自動判斷」使用中文 prompt，避免引導 Whisper 誤判為英文。
+
+### 按鈕狀態邏輯
+- 即時轉錄模式：「停止錄音並轉錄」按鈕 DISABLED
+- 非即時模式：「停止錄音並轉錄」按鈕 ENABLED
+- 勾選即時轉錄時自動調整按鈕狀態
+
+## 修改規則
+
+- ⛔ 不自動下載或修改模型檔案
+- ⛔ 不新增混音、雙軌合成功能
+- ⛔ 不把系統訊息寫入轉錄結果區
+- ✅ 說明與註解請用中文
+- ✅ 新功能優先放入 `src/` 模組
+- ✅ 所有流程結束顯示「✓ 已完成」
 
