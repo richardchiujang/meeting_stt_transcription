@@ -53,6 +53,10 @@ EXCLUDE_MODULES = [
     'transformers.models.gemma',
     'transformers.models.gemma2',
     'transformers.models.gemma3',
+    'matplotlib',  # 不使用繪圖功能
+    'IPython',     # 不需要互動式環境
+    'jupyter',     # 不需要 notebook
+    'pytest',      # 不需要測試框架
 ]
 
 
@@ -88,6 +92,12 @@ def prepare_build_copy():
 
 
 def patch_main_for_appdata():
+    """Patch main.py to use exe-relative directories for recordings/exports/model.
+    
+    When packaged as .exe:
+    - Bundled assets (ffmpeg, whisper/assets) → sys._MEIPASS (temp folder)
+    - User data (recordings, exports, model) → exe 所在目錄（可寫入）
+    """
     main_path = BUILD_DIR / ENTRY_SCRIPT
     if not main_path.exists():
         raise FileNotFoundError(main_path)
@@ -146,11 +156,21 @@ os.makedirs(EXPORTS_DIR, exist_ok=True)
 
 
 def build_with_pyinstaller():
+    """Run PyInstaller to build the .exe with all dependencies.
+    
+    配置說明：
+    - --onefile: 單一 exe 檔案（較慢但方便分發）
+    - --windowed: 無 console 視窗（GUI 應用）
+    - --clean: 清除暫存檔案
+    - --add-data: 打包資源檔案（ffmpeg, whisper assets）
+    - --exclude-module: 排除不需要的大型模組
+    """
     spec_args = [
         '--noconfirm',
         '--onefile',
         '--windowed',
         '--clean',
+        '--name=AI_STT_Transcriber',  # 自訂 exe 檔名
     ]
 
     sep = ';' if os.name == 'nt' else ':'
@@ -213,21 +233,31 @@ def copy_models_to_dist():
 
 
 def main():
-    print('Preparing build copy...')
+    print('='*60)
+    print('AI STT GUI 打包工具')
+    print('='*60)
+    print('\n步驟 1/5: 準備建置目錄...')
     prepare_build_copy()
-    print('Patching main.py...')
+    print('\n步驟 2/5: 修補 main.py（exe-relative paths）...')
     patch_main_for_appdata()
-    print('Running PyInstaller... (this may take minutes)')
+    print('\n步驟 3/5: 執行 PyInstaller（可能需要數分鐘）...')
     build_with_pyinstaller()
-    print('Build complete. Output in dist')
-    print('Copying model files to dist/ (next to exe)...')
+    print('\n步驟 4/5: 複製模型檔案到 dist/...')
     copy_models_to_dist()
-    print('Cleaning up temporary build copy...')
+    print('\n步驟 5/5: 清理暫存檔案...')
     try:
         shutil.rmtree(BUILD_DIR)
     except Exception:
         pass
-    print('Done.')
+    print('\n' + '='*60)
+    print('✓ 打包完成！')
+    print('='*60)
+    print(f'\n輸出位置: {DIST_DIR.resolve()}')
+    print('\n使用說明：')
+    print('  1. 將 model/ 資料夾放置於 .exe 同層目錄')
+    print('  2. 首次執行會自動建立 recordings/ 和 exports/')
+    print('  3. 確保 ffmpeg 已打包進 exe（whisper assets 同理）')
+    print('\n' + '='*60)
 
 
 if __name__ == '__main__':

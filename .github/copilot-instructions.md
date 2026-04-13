@@ -81,3 +81,11 @@ D:\conda_envs\lang_learn\python.exe -m ai_transcriber_gui.tests.test_mp3
 - ✅ 新功能優先放入 `src/` 模組
 - ✅ 所有流程結束顯示「✓ 已完成」
 
+## 打包注意事項
+
+- 使用 `build_exe.py` 打包，會自動修補路徑
+- 打包後 exe 使用 `sys._MEIPASS` 存取 bundled assets (ffmpeg, whisper assets)
+- 使用者資料 (recordings, exports, model) 放置於 exe 同層目錄
+- 新增功能時確認不引入需要額外打包的大型依賴
+- UI 變更不影響打包配置
+

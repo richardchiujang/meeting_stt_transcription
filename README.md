@@ -1,33 +1,141 @@
-# AI 會議錄音轉文字（GUI）
+# AI 會議錄音轉文字（GUI 版）
 
-簡短說明
-- 本專案提供一個基於 tkinter 的桌面 GUI，用於錄製或選取本機影音檔，並使用地端 Whisper / faster-whisper 模型進行中英夾雜優化的語音轉文字（STT）。
+**最後更新**：2026-04-13
 
-目錄
-- `ai_transcriber_gui/`：主程式與資源。
-- `ai_transcriber_gui/ffmpeg/`：可放置 ffmpeg 可執行檔（選用，或將 ffmpeg 加入系統 PATH）。
-- `ai_transcriber_gui/model/`：放置本地模型權重（請勿將大型檔案加入版本控制）。
-- `ai_transcriber_gui/recordings/`：錄音 MP3 存放（已被 .gitignore 忽略）。
-- `ai_transcriber_gui/exports/`：轉錄輸出（已被 .gitignore 忽略）。
+本專案提供圖形介面的語音轉文字工具，支援錄製麥克風/系統音、選取影音檔案，使用地端 Whisper / faster-whisper 模型進行中英夾雜轉錄。
 
-快速開始
-1. 建議建立並啟用虛擬環境（venv 或 conda）。
-2. 安裝依賴：
+## 主要功能
+
+- ✅ **雙音源錄音**：麥克風 / 系統音 (Loopback)
+- ✅ **即時/批次轉錄**：邊錄邊轉或錄完再轉
+- ✅ **多格式支援**：mp3, wav, mp4, mkv, m4a, mov, wmv
+- ✅ **多模型選擇**：faster-whisper (base/small/medium), openai-whisper
+- ✅ **語言優化**：主要中文、主要英文、系統自動判斷
+- ✅ **進度顯示**：音量顯示、轉錄進度條
+- ✅ **一鍵打包**：支援打包為 Windows .exe 單一執行檔
+
+## 快速開始
+
+### 開發環境執行
+
+```powershell
+cd D:\Python\meeting_stt_transcription
+D:\conda_envs\lang_learn\python.exe -m ai_transcriber_gui.main
+```
+
+### 打包為 exe
+
+```powershell
+# 打包前檢查
+python verify_package.py --pre
+
+# 執行打包
+python build_exe.py
+
+# 打包後驗證
+python verify_package.py --post
+```
+
+詳細說明請參閱 **[打包部署指南 (PACKAGING.md)](PACKAGING.md)**。
+
+## 目錄結構
+
+```text
+meeting_stt_transcription/
+├── ai_transcriber_gui/          # 主程式
+│   ├── main.py                  # 入口
+│   ├── src/                     # 核心模組
+│   │   ├── stt.py              # STT 引擎
+│   │   ├── ui.py               # GUI 介面
+│   │   ├── recorder.py         # 錄音功能
+│   │   ├── utils.py            # 音訊處理
+│   │   ├── devices.py          # 裝置列舉
+│   │   └── transcript.py       # 逐字稿處理
+│   ├── ffmpeg/                  # FFmpeg 工具
+│   └── model/                   # Whisper 模型 (不納入版控)
+├── recordings/                  # 錄音輸出
+├── exports/                     # 轉錄文字輸出
+├── build_exe.py                # 打包腳本
+├── verify_package.py           # 打包驗證腳本
+├── PACKAGING.md                # 打包部署指南
+└── project.md                  # 完整技術文檔
+```
+
+## 安裝依賴
 
 ```bash
 pip install -r ai_transcriber_gui/requirements.txt
 ```
 
-3. 確認 FFmpeg：
-- 可將 `ffmpeg/bin/ffmpeg.exe` 放在 `ai_transcriber_gui/ffmpeg/bin/`，或把系統上的 ffmpeg 加到 PATH。若無 ffmpeg，部分媒體檔（例如 mp4/mkv 提取音訊）可能無法處理。
+**主要依賴**：- soundcard, soundfile
+- openai-whisper, faster-whisper
+- torch (CUDA 或 CPU 版本)
+- pydub, numpy
+- tkinter (Python 內建)
 
-4. 放置模型（可選）：
-- 將 Whisper 或 faster-whisper 的模型權重放入 `ai_transcriber_gui/model/`，例如 `ai_transcriber_gui/model/whisper/` 或 `ai_transcriber_gui/model/faster-whisper/`。權重通常很大，請勿加入 git 版本控制。
+## 文檔
 
-執行
+- **[project.md](project.md)** - 完整技術文檔（架構、流程、設計決策）
+- **[PACKAGING.md](PACKAGING.md)** - 打包部署指南（詳細步驟、測試清單）
+- **[.github/issue.md](.github/issue.md)** - 問題追蹤與修正記錄
+- **[.github/copilot-instructions.md](.github/copilot-instructions.md)** - 開發指引
 
-```bash
-python ai_transcriber_gui/main.py
+## 使用說明
+
+### 錄音模式
+
+1. 選擇「錄音來源」(麥克風/系統音)
+2. 選擇「語言模式」(主要中文/主要英文/系統自動判斷)
+3. 勾選「即時轉錄」(邊錄邊轉) 或不勾選 (錄完再轉)
+4. 點擊「開始錄音」
+5. 點擊「開始錄音」(再次) 停止錄音
+6. 轉錄結果顯示在「轉錄結果」視窗，並自動存檔至 `exports/`
+
+### 選檔案模式
+
+1. 點擊「選取檔案」選擇音訊/影片檔案
+2. 勾選「即時轉錄」(分段處理) 或不勾選 (整檔處理)
+3. 等待轉錄完成
+4. 結果顯示在「轉錄結果」視窗，並自動存檔至 `exports/`
+
+### 清除功能
+
+點擊「清除」按鈕可清空「轉錄結果」視窗，方便開始新的轉錄任務。
+
+## 常見問題
+
+**Q: 系統音錄不到聲音？**  
+A: 確認已選擇正確的 loopback 裝置 (通常顯示為「喇叭 (loopback)」)。
+
+**Q: 轉錄結果語言錯誤？**  
+A: 選擇正確的「語言模式」：純中文選「主要中文」，純英文選「主要英文」。
+
+**Q: 即時轉錄延遲多久？**  
+A: 約 2.5 秒延遲（累積音訊後才轉錄，確保品質）。
+
+**Q: 打包後 exe 找不到模型？**  
+A: 確保 `model/` 資料夾放置於 exe 同層目錄。詳見 [PACKAGING.md](PACKAGING.md)。
+
+## 技術特點
+
+- **單一音源設計**：避免混音複雜度，專注品質
+- **即時轉錄優化**：累積 2.5 秒音訊緩衝，平衡延遲與準確度
+- **Prompt 過濾**：自動過濾 Whisper 輸出的 prompt 內容
+- **Thread 安全**：Queue-based 架構，避免 UI 凍結
+- **路徑自適應**：打包後自動使用 exe-relative 路徑
+
+## 授權
+
+MIT License
+
+## 貢獻
+
+歡迎提交 Issue 或 Pull Request。
+
+---
+
+**環境需求**：Windows 10/11, Python 3.10+, CUDA 11.8+ (選用)  
+**測試環境**：Windows 11, Python 3.12, CUDA 12.1
 ```
 
 功能要點

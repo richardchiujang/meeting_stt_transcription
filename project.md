@@ -217,13 +217,107 @@ Speed: faster-whisper ≫ openai-whisper (同尺寸)
 
 ## 打包部署
 
+### 快速打包
+
 ```powershell
+cd D:\Python\meeting_stt_transcription
 D:\conda_envs\lang_learn\python.exe build_exe.py 2>&1 | Tee-Object -FilePath build.log
 ```
 
-**打包範圍**：
-- ✅ 包含：`main.py`, `src/`, `ffmpeg/`
-- ❌ 不包含：`model/`, `recordings/`, `exports/`（需手動放置於 .exe 同層目錄）
+### 打包配置 (build_exe.py)
+
+**核心設定**：
+- **Conda 環境**：`D:\conda_envs\lang_learn`
+- **輸出目錄**：`dist/`
+- **Exe 名稱**：`AI_STT_Transcriber.exe`
+- **模式**：`--onefile` (單一執行檔), `--windowed` (無 console 視窗)
+
+**打包內容**：
+| 項目 | 來源 | 目標位置 | 說明 |
+|------|------|----------|------|
+| ffmpeg | `ai_transcriber_gui/ffmpeg/` | exe 內部 (`sys._MEIPASS`) | 音訊轉換工具 |
+| whisper assets | conda env site-packages | exe 內部 | mel_filters.npz 等 |
+| 使用說明 | `STT(語音轉文字)程式使用說明.txt` | exe 內部 | 用戶指南 |
+| **model/** | 手動複製 | exe 同層目錄 | Whisper 模型檔案 (不打包進 exe) |
+| **recordings/** | 執行時自動建立 | exe 同層目錄 | 錄音輸出 |
+| **exports/** | 執行時自動建立 | exe 同層目錄 | 轉錄文字輸出 |
+
+**排除模組** (減少 exe 體積)：
+```python
+transformers.models.gemma*  # 不需要的 transformer 模型
+matplotlib                  # 不使用繪圖功能
+IPython, jupyter            # 不需要互動式環境
+pytest                      # 不需要測試框架
+```
+
+### 打包流程
+
+```
+步驟 1/5: 準備建置目錄
+  ├─ 複製 ai_transcriber_gui/ 到臨時資料夾 build_pack/
+  
+步驟 2/5: 修補 main.py
+  ├─ 設定 exe-relative 路徑 (RECORDINGS_DIR, EXPORTS_DIR, MODEL_DIR)
+  ├─ 確保打包後能正確存取資源
+  
+步驟 3/5: 執行 PyInstaller (可能需要數分鐘)
+  ├─ 打包所有依賴模組
+  ├─ 壓縮為單一 exe
+  ├─ 產生 dist/AI_STT_Transcriber.exe
+  
+步驟 4/5: 複製模型檔案
+  ├─ 將 ai_transcriber_gui/model/ 複製到 dist/model/
+  
+步驟 5/5: 清理暫存檔案
+  └─ 刪除 build_pack/
+```
+
+### 部署檢查清單
+
+**打包前**：
+- [ ] 確認 Conda 環境已安裝所有依賴 (`pip install -r requirements.txt`)
+- [ ] 確認 PyInstaller 已安裝 (`pip install pyinstaller`)
+- [ ] 確認 ffmpeg 存在於 `ai_transcriber_gui/ffmpeg/bin/`
+- [ ] 確認模型檔案存在於 `ai_transcriber_gui/model/faster-whisper/`
+
+**打包後**：
+- [ ] 檢查 `dist/AI_STT_Transcriber.exe` 是否存在
+- [ ] 檢查 `dist/model/faster-whisper/` 是否包含模型
+- [ ] 執行 exe 測試基本功能
+- [ ] 確認錄音、轉錄、選檔功能正常
+
+**分發時**：
+```
+AI_STT_Transcriber/
+├── AI_STT_Transcriber.exe    # 主程式
+├── model/                     # 模型資料夾 (手動複製)
+│   ├── faster-whisper/
+│   │   ├── faster-whisper-base/
+│   │   ├── faster-whisper-small/
+│   │   └── faster-whisper-medium/
+│   └── whisper/               # (選用)
+├── recordings/                # 自動建立
+└── exports/                   # 自動建立
+```
+
+### 常見問題
+
+**Q: 為什麼 model/ 不打包進 exe？**  
+A: 模型檔案太大 (數百 MB ~ 數 GB)，打包進 exe 會導致：
+   - exe 體積過大，難以分發
+   - 啟動速度變慢
+   - 更新模型需要重新打包
+   
+   解決方案：將 model/ 放置於 exe 同層目錄，程式會自動讀取。
+
+**Q: 打包後執行顯示「找不到模型」？**  
+A: 確認 `dist/model/faster-whisper/faster-whisper-base/` 路徑存在，且包含 `config.json` 等檔案。
+
+**Q: 打包後轉錄顯示亂碼？**  
+A: 檢查 whisper assets 是否正確打包 (build_exe.py 會自動處理)。
+
+**Q: 如何更新程式？**  
+A: 修改原始碼後重新執行 `build_exe.py`，保留 dist/model/ 資料夾即可。
 
 ## 測試
 
