@@ -1,6 +1,6 @@
 # AI 語音轉文字工具 (GUI 版)
 
-最後更新：2026-04-13
+最後更新：2026-04-12
 本工具提供圖形介面，支援錄製麥克風或選取現有影音檔，使用地端 Whisper / faster-whisper 模型進行中英夾雜優化轉錄。
 
 ## 快速啟動
@@ -69,6 +69,7 @@ Accuracy：base < small < medium；Speed（同尺寸）：faster-whisper ≫ ope
 ## 功能
 
 - **麥克風錄音**：`soundcard` 錄製，存為 mp3（timestamp 命名）
+- **雙軌錄音（Mic + Loopback）**：麥克風與系統音同時錄製，停止後混音儲存
 - **影音檔轉錄**：支援 `.mp3 .wav .mp4 .mkv .m4a .mov .wmv`，FFmpeg 負責格式轉換
 - **語言模式**：主要中文 / 主要英文 / 系統自動判斷（透過 `initial_prompt` 引導）
 - **即時顯示**：切片 Queue 架構，邊錄邊轉，tkinter 不卡頓
@@ -83,16 +84,27 @@ pyinstaller --onefile --add-binary "ai_transcriber_gui/ffmpeg/bin/ffmpeg.exe;." 
 
 ## 音訊架構備忘（WASAPI Loopback）
 
-> **目前實作**：純麥克風錄音（`soundcard.default_microphone()`），未啟用系統音捕捉。
+**目前實作**：支援雙軌錄音（麥克風 + 系統音），UI 下拉選單獨立選擇 mic / loopback 裝置。
 
-若日後需要捕捉系統音（喇叭播放的聲音），正確做法：
+### 裝置列舉策略
 
-- 使用 **PyAudioWPatch**（非標準 PyAudio），專為 Windows WASAPI loopback 打 patch 的 fork
-- Loopback 裝置需以**輸出裝置 native format 錄製**（通常 48k/stereo），再離線 downsample 為 16k/mono 給 Whisper
-- 避免直接用 16k 抓 loopback（Windows 即時 resample 會降低品質）
-- 麥克風與系統音建議**分軌錄製再合併**（Whisper 對單一乾淨來源辨識率更高）
+- `sc.all_microphones(include_loopback=True)` 列出所有 soundcard 裝置
+- 用 `dev.isloopback` 屬性分類：`True` → `loopback_devices`；其餘 → `mic_devices`
+- PyAudio（PyAudioWPatch）補充列舉：name 含 "loop/loopback" 或 `isLoopback=True` 者加入 loopback 清單
+- `_device_map[name]` 直接存放 soundcard `Microphone` 物件（loopback）或 `('pyaudio', idx, info)` tuple
 
-常見舊版 loopback 失敗原因：
-1. 用 16k 直接抓（格式不符，Windows resample 糊化）
-2. 走進 AEC/AGC/NS DSP 路徑（Intel Smart Sound / Realtek 麥克風陣列），聲音忽大忽小
-3. sounddevice / soundcard 的 PortAudio build 不支援 loopback（誤以為在抓，實際上沒有）
+### 錄音路徑
+
+| 裝置組合 | 路徑 |
+|---------|------|
+| soundcard mic + soundcard loopback | `with mic.recorder(...), loop.recorder(...)` 同時開啟 |
+| pyaudio mic/loop + soundcard fallback | PyAudio stream 開於迴圈外；soundcard recorder 以 `__enter__` 提前開啟，`finally` 中 `__exit__` |
+
+- 錄音用裝置原生 samplerate（`default_samplerate`，通常 48k），停止後以正確 fs 寫檔
+- `_save_recording_file` 在即時模式停止時呼叫：讀取 `_mic_rec_fs` / `_loop_rec_fs`，mic + loopback 同 fs 時混音（各乘 0.6 再 clip），再匯出 mp3
+
+### 已知注意事項
+
+1. 系統音錄製需裝置以**輸出裝置 native format**（通常 48k/stereo）錄製；避免強制用 16k（Windows resample 糊化）
+2. Intel Smart Sound / Realtek 麥克風陣列走 AEC/AGC/NS DSP 路徑，聲音忽大忽小屬正常現象
+3. sounddevice / soundcard PortAudio build 若不支援 loopback，`isloopback=True` 裝置不會出現，需改用 PyAudioWPatch

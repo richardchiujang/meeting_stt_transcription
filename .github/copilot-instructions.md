@@ -44,3 +44,11 @@ applyTo:
 
 **已驗證**：`faster-whisper-base` 在 20 分鐘英文音檔上產生 216 segments，language=English, prob=1.0 ✅
 
+## Loopback 錄音架構（2026-04-12 修正完成）
+
+- `scan_audio_devices`：用 `dev.isloopback` 分類 mic vs loopback；PyAudioWPatch 補充列舉
+- `_device_map[name]` 存放 soundcard `Microphone` 物件（loopback）或 `('pyaudio', idx, info)` tuple
+- 雙軌錄音用裝置原生 samplerate（`default_samplerate`，通常 48k）；`_mic_rec_fs` / `_loop_rec_fs` 記錄實際 fs
+- PyAudio+soundcard 混合路徑：soundcard recorder 在 `while` 迴圈**外**以 `__enter__` 開啟，`finally` 中 `__exit__`
+- `_save_recording_file`：即時模式停止時呼叫，讀 `_mic_rec_fs/_loop_rec_fs`，同 fs 時 mic+loopback 混音（×0.6 clip），輸出 mp3
+

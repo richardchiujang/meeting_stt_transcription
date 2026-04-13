@@ -94,6 +94,26 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
 
+def _import_transcriber():
+    """Import Transcriber with absolute-then-relative fallback."""
+    try:
+        from ai_transcriber_gui.src.stt import Transcriber
+        return Transcriber
+    except ImportError:
+        pass
+    try:
+        from .src.stt import Transcriber
+        return Transcriber
+    except ImportError:
+        pass
+    try:
+        from src.stt import Transcriber
+        return Transcriber
+    except ImportError:
+        pass
+    return None
+
+
 class TranscriberApp:
     def __init__(self, root):
         self.root = root
@@ -112,9 +132,12 @@ class TranscriberApp:
         self.loaded_model_name = None
         # Transcriber (model manager)
         try:
-            from ai_transcriber_gui.src.stt import Transcriber
-            self.stt = Transcriber(device=self.device, fw_model_root=DEFAULT_FW_MODEL, w_model_dir=DEFAULT_W_MODEL_DIR)
+            _Transcriber = _import_transcriber()
+            if _Transcriber is None:
+                raise ImportError('cannot import Transcriber')
+            self.stt = _Transcriber(device=self.device, fw_model_root=DEFAULT_FW_MODEL, w_model_dir=DEFAULT_W_MODEL_DIR)
         except Exception:
+            logger.exception('Transcriber 初始化失敗，即時轉錄將無法使用')
             self.stt = None
         self.audio_queue = queue.Queue()
         self.transcribe_thread = None
@@ -127,6 +150,8 @@ class TranscriberApp:
         self.mic_devices = []
         self.loopback_devices = []
         self._device_map = {}
+        self._mic_rec_fs = 16000
+        self._loop_rec_fs = 16000
         # PyAudio instance if available
         try:
             self.pa = pa.PyAudio() if PA_AVAILABLE else None
@@ -244,70 +269,49 @@ class TranscriberApp:
         self._device_map = {}
         if sc is None:
             return
+
+        # Use include_loopback=True and isloopback attribute to separate real mics from loopback
         try:
             try:
-                mics = sc.all_microphones(include_loopback=True)
+                all_mics = sc.all_microphones(include_loopback=True)
             except TypeError:
-                mics = sc.all_microphones()
+                all_mics = sc.all_microphones()
+            for dev in all_mics:
+                name = getattr(dev, 'name', str(dev))
+                is_lb = getattr(dev, 'isloopback', False)
+                if is_lb:
+                    if name not in self.loopback_devices:
+                        self.loopback_devices.append(name)
+                        self._device_map[name] = dev  # proper loopback Microphone object
+                else:
+                    if name not in self.mic_devices:
+                        self.mic_devices.append(name)
+                        self._device_map[name] = dev
         except Exception:
-            mics = []
+            pass
 
-        try:
-            sps = sc.all_speakers()
-        except Exception:
-            sps = []
-
-        for dev in mics:
-            name = getattr(dev, 'name', str(dev))
-            self.mic_devices.append(name)
-            self._device_map[name] = dev
-
-        # If PyAudio is available, enumerate its devices and prefer loopback inputs
+        # Supplement with PyAudio devices (covers PyAudioWPatch explicit loopback)
         if self.pa is not None:
             try:
                 for i in range(self.pa.get_device_count()):
                     info = self.pa.get_device_info_by_index(i)
-                    name = info.get('name')
+                    name = info.get('name', '')
                     max_in = int(info.get('maxInputChannels', 0))
-                    # treat devices with input channels as microphones
-                    display_name = name
-                    # append index to display name to disambiguate identical names
-                    try:
-                        display_name = f"{name} [pyaudio idx={i}]"
-                    except Exception:
-                        display_name = name
-                    if max_in > 0:
+                    if max_in == 0:
+                        continue
+                    display_name = f"{name} [pa:{i}]"
+                    is_loop = ('loop' in name.lower() or 'loopback' in name.lower()
+                               or bool(info.get('isLoopback')))
+                    if is_loop:
+                        if display_name not in self.loopback_devices:
+                            self.loopback_devices.append(display_name)
+                            self._device_map[display_name] = ('pyaudio', i, info)
+                    else:
                         if display_name not in self.mic_devices:
                             self.mic_devices.append(display_name)
-                        # store a pyaudio mapping keyed by display_name
-                        if display_name not in self._device_map:
                             self._device_map[display_name] = ('pyaudio', i, info)
-                    # detect loopback candidates by name or info flag and prefer PyAudio mapping
-                    is_loop = False
-                    try:
-                        if 'loop' in (name or '').lower() or 'loopback' in (name or '').lower():
-                            is_loop = True
-                        # some PyAudio builds provide an explicit flag
-                        if info.get('isLoopback'):
-                            is_loop = True
-                    except Exception:
-                        pass
-                    if is_loop:
-                        lb_display = display_name + ' [Loopback]'
-                        if lb_display not in self.loopback_devices:
-                            self.loopback_devices.append(lb_display)
-                        # prefer pyaudio loopback mapping (overwrite any earlier mapping)
-                        self._device_map[lb_display] = ('pyaudio', i, info)
             except Exception:
                 pass
-
-        for dev in sps:
-            name = getattr(dev, 'name', str(dev))
-            if name not in self.loopback_devices:
-                self.loopback_devices.append(name)
-                # do not overwrite existing mapping (prefer microphone object when names collide)
-                if name not in self._device_map:
-                    self._device_map[name] = dev
 
         try:
             self.mic_combo.config(values=self.mic_devices)
@@ -327,6 +331,11 @@ class TranscriberApp:
             return
 
         self.is_recording = True
+        try:
+            self.btn_record.config(text="⏺ 錄音中...", bg="#cc0000", fg="white")
+            self.btn_stop.config(state=tk.NORMAL)
+        except Exception:
+            pass
         # reset buffer for this recording session
         self.full_audio = []
         self._record_fs = 16000 if self.realtime_var.get() else 48000
@@ -342,7 +351,7 @@ class TranscriberApp:
             self.transcribe_thread = threading.Thread(target=self.transcription_worker, daemon=True)
             self.transcribe_thread.start()
 
-        threading.Thread(target=self.record_logic, daemon=True).start()
+        threading.Thread(target=self._record_logic_with_ui, daemon=True).start()
 
     def record_logic(self):
         # choose samplerates per-device to avoid real-time resampling by OS
@@ -392,30 +401,21 @@ class TranscriberApp:
 
                 try:
                     lb_name = self.loopback_device_var.get()
-                    # prefer obtaining a microphone object that represents loopback
-                    try:
-                        if lb_name:
-                            loop_dev = sc.get_microphone(name=lb_name, include_loopback=True)
-                        else:
-                            loop_dev = sc.get_microphone(include_loopback=True)
-                    except Exception:
-                        # fallback: if get_microphone not supported for loopback, try mapping
-                        if lb_name and lb_name in self._device_map:
-                            loop_dev = self._device_map[lb_name]
-                        else:
-                            # last resort: use default speaker (may not support recorder)
-                            try:
-                                loop_dev = sc.default_speaker()
-                            except Exception:
-                                loop_dev = None
-                except Exception:
-                    try:
-                        loop_dev = sc.get_microphone(include_loopback=True)
-                    except Exception:
+                    # Use _device_map directly — it now stores proper loopback Microphone objects
+                    if lb_name and lb_name in self._device_map:
+                        loop_dev = self._device_map[lb_name]
+                    else:
+                        # No selection: find the first loopback device from soundcard
                         try:
-                            loop_dev = sc.default_speaker()
+                            try:
+                                _all = sc.all_microphones(include_loopback=True)
+                            except TypeError:
+                                _all = sc.all_microphones()
+                            loop_dev = next((d for d in _all if getattr(d, 'isloopback', False)), None)
                         except Exception:
                             loop_dev = None
+                except Exception:
+                    loop_dev = None
 
             # If pyaudio mapping was used for selected loopback, extract its index
             loop_pa_idx = None
@@ -464,6 +464,9 @@ class TranscriberApp:
             # fallback to common fs if device-specific not available
             mic_fs = mic_fs or fs
             loop_fs = loop_fs or fs
+            # store for use by _save_recording_file
+            self._mic_rec_fs = mic_fs
+            self._loop_rec_fs = loop_fs
 
             # Single-source: mic only
             if source == '麥克風' or sc is None:
@@ -513,41 +516,41 @@ class TranscriberApp:
                         return
                 else:
                     mic = mic_dev if mic_dev is not None else sc.default_microphone() if sc is not None else None
-                if mic is None:
-                    self.log('無法取得麥克風裝置。')
-                    return
-                # use device-native samplerate for mic recorder
-                with mic.recorder(samplerate=mic_fs, channels=1) as mic_rec:
-                    while self.is_recording:
-                        # use ~200ms chunks to reduce callback overhead and discontinuities
-                        frames = int(mic_fs * 0.2)
-                        m_data = mic_rec.record(numframes=frames)
-                        chunk = np.mean(m_data, axis=1).astype(np.float32)
-                        try:
-                            rms = np.sqrt(np.mean(chunk.astype(np.float64) ** 2))
-                            pct = int(min(100, (rms / 0.1) * 100))
+                    if mic is None:
+                        self.log('無法取得麥克風裝置。')
+                        return
+                    # use device-native samplerate for mic recorder
+                    with mic.recorder(samplerate=mic_fs, channels=1) as mic_rec:
+                        while self.is_recording:
+                            # use ~200ms chunks to reduce callback overhead and discontinuities
+                            frames = int(mic_fs * 0.2)
+                            m_data = mic_rec.record(numframes=frames)
+                            chunk = np.mean(m_data, axis=1).astype(np.float32)
                             try:
-                                self.root.after(0, self.update_volume, pct, 0)
+                                rms = np.sqrt(np.mean(chunk.astype(np.float64) ** 2))
+                                pct = int(min(100, (rms / 0.1) * 100))
+                                try:
+                                    self.root.after(0, self.update_volume, pct, 0)
+                                except Exception:
+                                    pass
                             except Exception:
                                 pass
-                        except Exception:
-                            pass
-                        try:
-                            self.full_audio.append(chunk)
-                        except Exception:
-                            pass
-                        if self.realtime_var.get():
                             try:
-                                self.audio_queue.put(chunk, block=False)
+                                self.full_audio.append(chunk)
                             except Exception:
                                 pass
+                            if self.realtime_var.get():
+                                try:
+                                    self.audio_queue.put(chunk, block=False)
+                                except Exception:
+                                    pass
 
                 if not self.full_audio:
                     self.log("錄音沒有捕捉到資料。")
                     return
 
                 final_array = np.concatenate(self.full_audio) if self.full_audio else np.array([], dtype=np.float32)
-                sf.write(temp_wav_mic, final_array, fs)
+                sf.write(temp_wav_mic, final_array, mic_fs)  # use actual recording rate
                 mp3_path = temp_wav_mic
                 if AudioSegment is not None:
                     ts = datetime.now().strftime('%m%d_%H%M')
@@ -646,7 +649,7 @@ class TranscriberApp:
                     return
 
                 final_array = np.concatenate(self.full_audio_loop) if self.full_audio_loop else np.array([], dtype=np.float32)
-                sf.write(temp_wav_loop, final_array, fs)
+                sf.write(temp_wav_loop, final_array, loop_fs)  # use actual recording rate
                 mp3_path = temp_wav_loop
                 if AudioSegment is not None:
                     ts = datetime.now().strftime('%m%d_%H%M')
@@ -699,7 +702,7 @@ class TranscriberApp:
                         return
 
                     final_array = np.concatenate(self.full_audio) if self.full_audio else np.array([], dtype=np.float32)
-                    sf.write(temp_wav_mic, final_array, fs)
+                    sf.write(temp_wav_mic, final_array, mic_fs)  # use actual recording rate
                     mp3_path = temp_wav_mic
                     if AudioSegment is not None:
                         ts = datetime.now().strftime('%m%d_%H%M')
@@ -738,79 +741,84 @@ class TranscriberApp:
                                                     input=True, frames_per_buffer=frames_l,
                                                     input_device_index=loop_pa_idx)
 
-                        while self.is_recording:
-                            # read mic
-                            chunk_m = None
-                            chunk_l = None
-                            if stream_m is not None:
-                                raw_m = stream_m.read(frames_m, exception_on_overflow=False)
-                                data_m = np.frombuffer(raw_m, dtype=np.int16).astype(np.float32) / 32768.0
-                                if m_ch > 1:
-                                    data_m = data_m.reshape(-1, m_ch)
-                                    chunk_m = np.mean(data_m, axis=1).astype(np.float32)
-                                else:
-                                    chunk_m = data_m
-                            else:
-                                # fallback to soundcard mic recorder
-                                m_frames = int(mic_fs * 0.2)
-                                m_data = mic.recorder(samplerate=mic_fs, channels=1).record(numframes=m_frames)
-                                chunk_m = np.mean(m_data, axis=1).astype(np.float32)
-
-                            if stream_l is not None:
-                                raw_l = stream_l.read(frames_l, exception_on_overflow=False)
-                                data_l = np.frombuffer(raw_l, dtype=np.int16).astype(np.float32) / 32768.0
-                                if l_ch > 1:
-                                    data_l = data_l.reshape(-1, l_ch)
-                                    chunk_l = np.mean(data_l, axis=1).astype(np.float32)
-                                else:
-                                    chunk_l = data_l
-                            else:
-                                lb_frames = int(loop_fs * 0.2)
-                                lb_data = loop.recorder(samplerate=loop_fs, channels=2).record(numframes=lb_frames)
-                                chunk_l = np.mean(lb_data, axis=1).astype(np.float32)
-
-                            # compute levels and enqueue
-                            try:
-                                rms = np.sqrt(np.mean(chunk_m.astype(np.float64) ** 2)) if chunk_m is not None else 0
-                                pct = int(min(100, (rms / 0.1) * 100))
-                                rms_l = np.sqrt(np.mean(chunk_l.astype(np.float64) ** 2)) if chunk_l is not None else 0
-                                pct_l = int(min(100, (rms_l / 0.1) * 100))
-                                self.root.after(0, self.update_volume, pct, pct_l)
-                                try:
-                                    self.audio_queue.put((chunk_m, chunk_l), block=False)
-                                except Exception:
-                                    pass
-                            except Exception:
-                                pass
-
-                            try:
-                                if chunk_m is not None:
-                                    self.full_audio.append(chunk_m)
-                            except Exception:
-                                pass
-                            try:
-                                if chunk_l is not None:
-                                    self.full_audio_loop.append(chunk_l)
-                            except Exception:
-                                pass
-
-                            if self.realtime_var.get():
-                                try:
-                                    self.audio_queue.put((chunk_m, chunk_l), block=False)
-                                except Exception:
-                                    pass
-
+                        # Open soundcard context managers OUTSIDE the loop if stream is None
+                        _mic_sc_ctx = mic.recorder(samplerate=mic_fs, channels=1) if stream_m is None and mic is not None else None
+                        _loop_sc_ctx = loop.recorder(samplerate=loop_fs, channels=2) if stream_l is None and loop is not None else None
+                        _mic_sc_rec = _mic_sc_ctx.__enter__() if _mic_sc_ctx is not None else None
+                        _loop_sc_rec = _loop_sc_ctx.__enter__() if _loop_sc_ctx is not None else None
                         try:
-                            if stream_m is not None:
-                                stream_m.stop_stream(); stream_m.close()
-                            if stream_l is not None:
-                                stream_l.stop_stream(); stream_l.close()
-                        except Exception:
-                            pass
+                            while self.is_recording:
+                                chunk_m = None
+                                chunk_l = None
+                                if stream_m is not None:
+                                    raw_m = stream_m.read(frames_m, exception_on_overflow=False)
+                                    data_m = np.frombuffer(raw_m, dtype=np.int16).astype(np.float32) / 32768.0
+                                    if m_ch > 1:
+                                        data_m = data_m.reshape(-1, m_ch)
+                                        chunk_m = np.mean(data_m, axis=1).astype(np.float32)
+                                    else:
+                                        chunk_m = data_m
+                                elif _mic_sc_rec is not None:
+                                    m_data = _mic_sc_rec.record(numframes=int(mic_fs * 0.2))
+                                    chunk_m = np.mean(m_data, axis=1).astype(np.float32)
+
+                                if stream_l is not None:
+                                    raw_l = stream_l.read(frames_l, exception_on_overflow=False)
+                                    data_l = np.frombuffer(raw_l, dtype=np.int16).astype(np.float32) / 32768.0
+                                    if l_ch > 1:
+                                        data_l = data_l.reshape(-1, l_ch)
+                                        chunk_l = np.mean(data_l, axis=1).astype(np.float32)
+                                    else:
+                                        chunk_l = data_l
+                                elif _loop_sc_rec is not None:
+                                    lb_data = _loop_sc_rec.record(numframes=int(loop_fs * 0.2))
+                                    chunk_l = np.mean(lb_data, axis=1).astype(np.float32)
+
+                                # compute levels and store
+                                try:
+                                    rms = np.sqrt(np.mean(chunk_m.astype(np.float64) ** 2)) if chunk_m is not None else 0
+                                    pct = int(min(100, (rms / 0.1) * 100))
+                                    rms_l = np.sqrt(np.mean(chunk_l.astype(np.float64) ** 2)) if chunk_l is not None else 0
+                                    pct_l = int(min(100, (rms_l / 0.1) * 100))
+                                    self.root.after(0, self.update_volume, pct, pct_l)
+                                except Exception:
+                                    pass
+                                try:
+                                    if chunk_m is not None:
+                                        self.full_audio.append(chunk_m)
+                                except Exception:
+                                    pass
+                                try:
+                                    if chunk_l is not None:
+                                        self.full_audio_loop.append(chunk_l)
+                                except Exception:
+                                    pass
+                                if self.realtime_var.get() and chunk_m is not None and chunk_l is not None:
+                                    try:
+                                        self.audio_queue.put((chunk_m, chunk_l), block=False)
+                                    except Exception:
+                                        pass
+                        finally:
+                            if _mic_sc_ctx is not None:
+                                try:
+                                    _mic_sc_ctx.__exit__(None, None, None)
+                                except Exception:
+                                    pass
+                            if _loop_sc_ctx is not None:
+                                try:
+                                    _loop_sc_ctx.__exit__(None, None, None)
+                                except Exception:
+                                    pass
+                            try:
+                                if stream_m is not None:
+                                    stream_m.stop_stream(); stream_m.close()
+                                if stream_l is not None:
+                                    stream_l.stop_stream(); stream_l.close()
+                            except Exception:
+                                pass
                     except Exception:
                         logger.exception('pyaudio dual-track read failed')
                         self.log('pyaudio 雙軌讀取失敗，改以單軌錄製')
-                        # fall through to fallback single-track behavior
                 else:
                     with mic.recorder(samplerate=mic_fs, channels=1) as mic_rec, loop.recorder(samplerate=loop_fs, channels=2) as lb_rec:
                         while self.is_recording:
@@ -826,21 +834,13 @@ class TranscriberApp:
                                 rms = np.sqrt(np.mean(chunk_m.astype(np.float64) ** 2))
                                 pct = int(min(100, (rms / 0.1) * 100))
                                 try:
-                                    # put a tuple (mic_chunk, loop_chunk) for realtime worker
-                                    # also update UI with both levels
-                                    # compute loopback RMS
-                                    try:
-                                        rms_lb = np.sqrt(np.mean(chunk_lb.astype(np.float64) ** 2))
-                                        pct_lb = int(min(100, (rms_lb / 0.1) * 100))
-                                    except Exception:
-                                        pct_lb = 0
-                                    self.root.after(0, self.update_volume, pct, pct_lb)
-                                    self.audio_queue.put((chunk_m, chunk_lb), block=False)
+                                    rms_lb = np.sqrt(np.mean(chunk_lb.astype(np.float64) ** 2))
+                                    pct_lb = int(min(100, (rms_lb / 0.1) * 100))
                                 except Exception:
-                                    pass
+                                    pct_lb = 0
+                                self.root.after(0, self.update_volume, pct, pct_lb)
                             except Exception:
                                 pass
-
                             try:
                                 self.full_audio.append(chunk_m)
                             except Exception:
@@ -849,10 +849,8 @@ class TranscriberApp:
                                 self.full_audio_loop.append(chunk_lb)
                             except Exception:
                                 pass
-
                             if self.realtime_var.get():
                                 try:
-                                    # put a tuple (mic_chunk, loop_chunk) for realtime worker
                                     self.audio_queue.put((chunk_m, chunk_lb), block=False)
                                 except Exception:
                                     pass
@@ -861,16 +859,16 @@ class TranscriberApp:
                     self.log("錄音沒有捕捉到資料。")
                     return
 
-                # write both tracks
+                # write both tracks using device-native rates
                 if self.full_audio:
                     final_m = np.concatenate(self.full_audio)
-                    sf.write(temp_wav_mic, final_m, fs)
+                    sf.write(temp_wav_mic, final_m, mic_fs)
                 else:
                     temp_wav_mic = None
 
                 if self.full_audio_loop:
                     final_lb = np.concatenate(self.full_audio_loop)
-                    sf.write(temp_wav_loop, final_lb, fs)
+                    sf.write(temp_wav_loop, final_lb, loop_fs)
                 else:
                     temp_wav_loop = None
 
@@ -947,6 +945,19 @@ class TranscriberApp:
         self.log("停止錄音，處理中...")
         try:
             self.root.after(0, self.update_volume, 0, 0)
+        except Exception:
+            pass
+
+    def _record_logic_with_ui(self):
+        """Wrapper around record_logic that restores the record button when done."""
+        try:
+            self.record_logic()
+        finally:
+            self.root.after(0, self._restore_record_btn)
+
+    def _restore_record_btn(self):
+        try:
+            self.btn_record.config(text="錄製麥克風", bg="#f0ad4e", fg="black")
         except Exception:
             pass
 
@@ -1117,25 +1128,50 @@ class TranscriberApp:
             logger.exception("_save_partial_result failed")
 
     def _save_recording_file(self):
-        """Write current accumulated realtime recording to an mp3 (if any)."""
+        """Write current accumulated realtime recording to an mp3 (mic + loopback mixed)."""
         try:
-            if not getattr(self, 'full_audio', None):
+            mic_audio = getattr(self, 'full_audio', None)
+            loop_audio = getattr(self, 'full_audio_loop', None)
+            if not mic_audio and not loop_audio:
                 return None
-            # create temp wav and export to mp3
+
+            mic_fs = getattr(self, '_mic_rec_fs', 16000)
+            loop_fs = getattr(self, '_loop_rec_fs', mic_fs)
+
             ts = datetime.now().strftime('%m%d_%H%M%S')
             tmp_wav = os.path.join(RECORDINGS_DIR, f'realtime_{ts}.wav')
             mp3_path = os.path.join(RECORDINGS_DIR, f'realtime_{ts}.mp3')
+
             try:
-                arr = np.concatenate(self.full_audio)
+                arr_mic = np.concatenate(mic_audio) if mic_audio else None
             except Exception:
-                return None
-            sf.write(tmp_wav, arr, getattr(self, '_record_fs', 16000))
+                arr_mic = None
+            try:
+                arr_loop = np.concatenate(loop_audio) if loop_audio else None
+            except Exception:
+                arr_loop = None
+
+            # Mix loopback into mic when samplerates match (typical: both 48k WASAPI)
+            write_fs = mic_fs
+            if arr_mic is not None and arr_loop is not None and mic_fs == loop_fs:
+                n = max(len(arr_mic), len(arr_loop))
+                mixed = np.zeros(n, dtype=np.float32)
+                mixed[:len(arr_mic)] += arr_mic * 0.6
+                mixed[:len(arr_loop)] += arr_loop * 0.6
+                np.clip(mixed, -1.0, 1.0, out=mixed)
+                arr = mixed
+            elif arr_mic is not None:
+                arr = arr_mic
+            else:
+                arr = arr_loop
+                write_fs = loop_fs
+
+            sf.write(tmp_wav, arr, write_fs)
             if AudioSegment is not None:
                 try:
                     AudioSegment.from_wav(tmp_wav).export(mp3_path, format='mp3')
                     os.remove(tmp_wav)
                 except Exception:
-                    # if export fails, keep wav
                     mp3_path = tmp_wav
             else:
                 mp3_path = tmp_wav
@@ -1270,8 +1306,19 @@ class TranscriberApp:
         # Real-time chunked transcription worker (live recording)
         selected = self.model_var.get()
         if self.stt is None:
-            # nothing to do
-            self.log("轉錄引擎未就緒，無法即時轉錄。")
+            # Try to lazily initialize
+            try:
+                _Transcriber = _import_transcriber()
+                if _Transcriber is None:
+                    raise ImportError('cannot import Transcriber')
+                self.stt = _Transcriber(device=self.device, fw_model_root=DEFAULT_FW_MODEL, w_model_dir=DEFAULT_W_MODEL_DIR)
+                logger.info('Transcriber lazily initialized in transcription_worker')
+            except Exception:
+                logger.exception('Transcriber lazy init failed')
+                self.log("轉錄引擎未就緒，將僅儲存錄音檔。")
+                return
+        if self.stt is None:
+            self.log("轉錄引擎未就緒，將僅儲存錄音檔。")
             return
 
         self.start_progress()
@@ -1424,4 +1471,10 @@ def main():
 
 
 if __name__ == "__main__":
+    import sys as _sys, os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _parent = _os.path.dirname(_here)
+    for _p in [_here, _parent]:
+        if _p not in _sys.path:
+            _sys.path.insert(0, _p)
     main()
