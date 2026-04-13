@@ -1,6 +1,8 @@
 import os
 import subprocess
 from datetime import datetime
+from pathlib import Path
+import ctypes
 try:
     from pydub import AudioSegment
 except Exception:
@@ -15,8 +17,72 @@ import numpy as np
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # src/
 _PKG_DIR = os.path.dirname(BASE_DIR)                    # ai_transcriber_gui/
 PROJECT_ROOT = os.path.dirname(_PKG_DIR)                 # project root
-RECORDINGS_DIR = os.path.join(PROJECT_ROOT, "recordings")
-EXPORTS_DIR = os.path.join(PROJECT_ROOT, "exports")
+
+# Store user-visible outputs under LOCALAPPDATA (fallback to home) so
+# packaged executables and temp dirs don't expose 8.3 short names.
+APP_FOLDER_NAME = "AI_STT_Transcriber"
+
+def _get_user_base_dir() -> Path:
+    """Return the base dir for recordings/exports.
+
+    - When running as a packaged exe (sys.frozen), prefer the exe directory
+      so `recordings` and `exports` are created next to the executable.
+    - Otherwise (development), use LOCALAPPDATA/APP_FOLDER_NAME (fallback to home).
+    """
+    import sys
+    # If running as a bundled executable, place outputs directly next to
+    # the exe: [exe-folder]/recordings and [exe-folder]/exports.
+    if getattr(sys, 'frozen', False):
+        exe_dir = Path(sys.executable).parent
+        exe_dir.mkdir(parents=True, exist_ok=True)
+        return exe_dir
+
+    # Development mode: use the project root so recordings/ and exports/
+    # are created next to the project (project root).
+    try:
+        root_dir = Path(PROJECT_ROOT)
+        root_dir.mkdir(parents=True, exist_ok=True)
+        return root_dir
+    except Exception:
+        base = os.environ.get('LOCALAPPDATA') or str(Path.home())
+        p = Path(base) / APP_FOLDER_NAME
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+def get_recordings_dir() -> str:
+    p = _get_user_base_dir() / 'recordings'
+    p.mkdir(parents=True, exist_ok=True)
+    return str(p)
+
+def get_exports_dir() -> str:
+    p = _get_user_base_dir() / 'exports'
+    p.mkdir(parents=True, exist_ok=True)
+    return str(p)
+
+def get_long_path(path: str) -> str:
+    """Convert a possible 8.3 short path to its long name on Windows.
+
+    If conversion fails or platform is non-Windows, returns the original path.
+    """
+    try:
+        GetLongPathNameW = ctypes.windll.kernel32.GetLongPathNameW
+    except Exception:
+        return path
+    GetLongPathNameW.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint)
+    GetLongPathNameW.restype = ctypes.c_uint
+    buf_size = 260
+    while True:
+        buf = ctypes.create_unicode_buffer(buf_size)
+        needed = GetLongPathNameW(path, buf, buf_size)
+        if needed == 0:
+            return path
+        if needed <= buf_size:
+            return buf.value
+        buf_size = needed
+
+# Backwards-compatible module-level vars
+RECORDINGS_DIR = get_recordings_dir()
+EXPORTS_DIR = get_exports_dir()
 FFMPEG_BIN = os.path.join(BASE_DIR, "ffmpeg", "bin")
 FFMPEG_EXE = os.path.join(FFMPEG_BIN, "ffmpeg.exe")
 if os.path.isdir(FFMPEG_BIN):

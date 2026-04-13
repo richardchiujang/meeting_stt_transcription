@@ -92,11 +92,17 @@ def scan_available_models():
     
     return sorted(available)
 
-# recordings and exports are placed at project root (one level above ai_transcriber_gui/)
-RECORDINGS_DIR = os.path.join(PROJECT_ROOT, "recordings")
-EXPORTS_DIR = os.path.join(PROJECT_ROOT, "exports")
-for folder in [RECORDINGS_DIR, EXPORTS_DIR]:
-    os.makedirs(folder, exist_ok=True)
+# recordings and exports are placed in a user-local folder (LOCALAPPDATA or home)
+try:
+    from ai_transcriber_gui.src.utils import get_recordings_dir, get_exports_dir, get_long_path
+except Exception:
+    try:
+        from .src.utils import get_recordings_dir, get_exports_dir, get_long_path
+    except Exception:
+        from src.utils import get_recordings_dir, get_exports_dir, get_long_path
+
+RECORDINGS_DIR = get_recordings_dir()
+EXPORTS_DIR = get_exports_dir()
 
 # Setup logging to file and console
 log_path = os.path.join(EXPORTS_DIR, "transcriber.log")
@@ -292,7 +298,12 @@ class TranscriberApp:
         return
 
     def start_record_thread(self):
+        # Allow the record button to act as a stop when already recording
         if self.is_recording:
+            try:
+                self.stop_record()
+            except Exception:
+                pass
             return
         if sc is None:
             messagebox.showerror("缺少套件", "soundcard/soundfile 未安裝，無法錄音。請安裝 requirements.txt 中的套件。")
@@ -779,6 +790,23 @@ class TranscriberApp:
 
         self.stop_progress()
         self.log("即時轉錄執行緒結束。")
+        # Save any accumulated realtime transcript as a partial note
+        try:
+            raw = self.result_area.get("1.0", tk.END).strip() if hasattr(self, 'result_area') else ''
+        except Exception:
+            raw = ''
+        if raw:
+            try:
+                transcript_utils = _import_transcript_utils()
+                if transcript_utils is not None:
+                    _, _, save_partial_note = transcript_utils
+                    try:
+                        output_txt = save_partial_note(EXPORTS_DIR, raw)
+                        self.log(f"部分轉錄已存至: {output_txt}")
+                    except Exception as exc:
+                        self.log(f"儲存部分轉錄失敗: {exc}")
+            except Exception:
+                pass
         self.log("✓ 已完成")
         logger.info("transcription_worker finished")
 
