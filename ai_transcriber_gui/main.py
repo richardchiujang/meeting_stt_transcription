@@ -221,6 +221,26 @@ def _import_devices():
     return None
 
 
+def _import_prepare_for_stt():
+    """Import prepare_for_stt helper with absolute-then-relative fallback."""
+    try:
+        from ai_transcriber_gui.src.stt import prepare_for_stt
+        return prepare_for_stt
+    except Exception:
+        pass
+    try:
+        from .src.stt import prepare_for_stt
+        return prepare_for_stt
+    except Exception:
+        pass
+    try:
+        from src.stt import prepare_for_stt
+        return prepare_for_stt
+    except Exception:
+        pass
+    return None
+
+
 class TranscriberApp:
     def __init__(self, root):
         self.root = root
@@ -287,6 +307,16 @@ class TranscriberApp:
         if ui is not None:
             ui[1](self, f"[{datetime.now().strftime('%H:%M:%S')}] {text}\n")
         logger.info(text)
+        # ensure file handlers flush promptly when running as exe
+        try:
+            for h in logger.handlers:
+                try:
+                    if hasattr(h, 'flush'):
+                        h.flush()
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def append_stt_text(self, text: str):
         ui = _import_ui()
@@ -443,7 +473,17 @@ class TranscriberApp:
             else:
                 self.log("批次轉錄模式：整檔處理...")
             self.stop_transcription = False
-            threading.Thread(target=self.transcribe_selected_file, args=(file_path,), daemon=True).start()
+            try:
+                t = threading.Thread(target=self.transcribe_selected_file, args=(file_path,), daemon=True)
+                t.start()
+                self.log(f"轉錄執行緒已啟動 (daemon={t.daemon})")
+            except Exception as e:
+                # Log and show a messagebox so the user knows something went wrong
+                logger.exception('Failed to start transcribe thread')
+                try:
+                    messagebox.showerror('啟動轉錄失敗', f'無法啟動轉錄執行緒: {e}')
+                except Exception:
+                    pass
 
     def transcribe_selected_file(self, file_path: str):
         """Prepare an audio file and transcribe it (realtime stream or batch mode)."""
@@ -451,9 +491,20 @@ class TranscriberApp:
         temp_prepared_path = None
         try:
             self.log(f"開始轉錄: {os.path.basename(file_path)}")
+            self.log(f"[TRACE] transcribe_selected_file enter: {file_path}")
+            t0 = datetime.now()
 
-            from ai_transcriber_gui.src.stt import prepare_for_stt as _prepare_for_stt
-            prepared_path = _prepare_for_stt(file_path)
+            _prepare_for_stt = _import_prepare_for_stt()
+            if _prepare_for_stt is None:
+                self.log('[TRACE] prepare_for_stt import failed; skipping pre-processing')
+                prepared_path = file_path
+            else:
+                try:
+                    prepared_path = _prepare_for_stt(file_path)
+                except Exception:
+                    logger.exception('prepare_for_stt failed')
+                    self.log('前處理音檔失敗，改用原始檔案')
+                    prepared_path = file_path
             if prepared_path != file_path:
                 temp_prepared_path = prepared_path
                 self.log(f"已前處理為 16k mono WAV: {os.path.basename(prepared_path)}")
@@ -461,10 +512,22 @@ class TranscriberApp:
             # 根據即時轉錄勾選決定轉錄方式
             if self.realtime_var.get():
                 # 即時模式：分段串流轉錄
-                self.transcribe_file_stream(prepared_path)
+                self.log(f"[TRACE] calling transcribe_file_stream start: {datetime.now().isoformat()}")
+                try:
+                    self.transcribe_file_stream(prepared_path)
+                except Exception:
+                    logger.exception('transcribe_file_stream raised')
+                    self.log('分段轉錄失敗 (內部例外)，請查看日誌')
+                self.log(f"[TRACE] calling transcribe_file_stream end: {datetime.now().isoformat()}")
             else:
                 # 批次模式：整檔一次轉錄
-                self.transcribe_file_batch(prepared_path, file_path)
+                self.log(f"[TRACE] calling transcribe_file_batch start: {datetime.now().isoformat()}")
+                try:
+                    self.transcribe_file_batch(prepared_path, file_path)
+                except Exception:
+                    logger.exception('transcribe_file_batch raised')
+                    self.log('批次轉錄失敗 (內部例外)，請查看日誌')
+                self.log(f"[TRACE] calling transcribe_file_batch end: {datetime.now().isoformat()}")
                 
         finally:
             if temp_prepared_path and os.path.isfile(temp_prepared_path):
@@ -472,6 +535,10 @@ class TranscriberApp:
                     os.remove(temp_prepared_path)
                 except Exception:
                     pass
+            try:
+                self.log(f"[TRACE] transcribe_selected_file exit (duration): {(datetime.now()-t0).total_seconds():.2f}s")
+            except Exception:
+                pass
 
     def transcribe_file_batch(self, prepared_path: str, original_path: str):
         """批次模式：整檔一次轉錄，完成後一次性顯示所有文字"""

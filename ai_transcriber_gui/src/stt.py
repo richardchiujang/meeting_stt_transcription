@@ -1,6 +1,7 @@
 """STT helpers and model-related utilities."""
 import os
 from typing import Optional
+import logging
 try:
     from ai_transcriber_gui.src.utils import prepare_for_stt as _prepare_for_stt
 except Exception:
@@ -38,6 +39,8 @@ try:
     import torch
 except Exception:
     torch = None
+
+logger = logging.getLogger('transcriber')
 
 
 DEFAULT_FW_MODEL = None
@@ -115,6 +118,7 @@ class Transcriber:
                     out.append({'start': s.get('start', 0), 'end': s.get('end', 0), 'text': s.get('text', '')})
                 return out
         except Exception:
+            logger.exception('transcribe_file_to_text failed')
             return []
 
     def transcribe_chunk(self, chunk, selected_model: str, language: Optional[str] = None, initial_prompt: Optional[str] = None) -> str:
@@ -184,6 +188,7 @@ class Transcriber:
             
             return result
         except Exception:
+            logger.exception('transcribe_chunk failed')
             return ''
 
     def transcribe_file_stream(self, file_path: str, selected_model: str, on_segment=None, progress_callback=None, chunk_seconds: int = 8, stop_callback=None, language: Optional[str] = None, initial_prompt: Optional[str] = None):
@@ -209,7 +214,11 @@ class Transcriber:
             else:
                 source = file_path
 
-            import soundfile as sfh
+            try:
+                import soundfile as sfh
+            except Exception:
+                logger.exception('soundfile import failed in transcribe_file_stream')
+                raise
             with sfh.SoundFile(source) as fh:
                 samplerate = fh.samplerate
                 total_frames = len(fh)
@@ -257,7 +266,7 @@ class Transcriber:
                         if txt and on_segment is not None:
                             on_segment(txt)
                     except Exception:
-                        pass
+                        logger.exception('Error transcribing chunk in stream')
 
                     if stop_callback is not None:
                         try:
@@ -271,6 +280,9 @@ class Transcriber:
                     if progress_callback is not None:
                         progress_callback(percent)
 
+        except Exception:
+            logger.exception('transcribe_file_stream failed')
+            raise
         finally:
             if tmp_wav is not None:
                 try:
